@@ -302,6 +302,9 @@ class ControlPanel(QFrame):
     def _on_overlay_toggled(self) -> None:
         """Emit updated overlay configuration when checkboxes are clicked."""
         self.overlay_options_changed.emit(self.show_masks, self.show_boxes, self.show_labels)
+
+    @property
+    def confidence_threshold(self) -> float:
         """Get the current confidence threshold fraction [0.05, 0.95]."""
         return self._slider.value() / 100.0
 
