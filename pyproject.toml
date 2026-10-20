@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trashnet"
+version = "0.1.0"
+description = "Real-time AI waste sorting and instance segmentation desktop application"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Trash-Net Development Team" }
+]
+dependencies = [
+    "numpy==2.5.4",
+    "opencv-python-headless==5.0.0.93",
+    "PyQt6==6.11.0",
+    "PyQt6-Qt6==6.11.2",
+    "PyQt6_sip==13.13.0",
+    "torch==2.14.1",
+    "torchvision==0.29.1",
+    "ultralytics==8.4.183",
+    "PyYAML==6.0.3",
+    "pillow==12.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "anyio==4.15.1",
+    "pip-tools==7.4.1",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+]
+
+[project.scripts]
+trashnet = "ui.main_window:run_app"
+
+[tool.setuptools.packages.find]
+include = ["core*", "ui*", "trashnet*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+disallow_untyped_defs = false
+warn_unused_ignores = true
+exclude = [
+    "tests/",
+    "ui/",
+    "scripts/",
+]

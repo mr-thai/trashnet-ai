@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-10-20T18:03:20.941990",
+  "image_filename": "flagged_20261020_180320_941990.jpg",
+  "hazardous": true,
+  "user_note": "Báo cáo thủ công từ người dùng",
+  "detection_count": 3,
+  "detections": [
+    {
+      "class_id": 0,
+      "class_name": "person",
+      "confidence": 0.875,
+      "bin_type": "ORGANIC",
+      "box": [
+        79,
+        11,
+        618,
+        479
+      ]
+    },
+    {
+      "class_id": 40,
+      "class_name": "wine glass",
+      "confidence": 0.26,
+      "bin_type": "UNKNOWN",
+      "box": [
+        567,
+        101,
+        640,
+        465
+      ]
+    },
+    {
+      "class_id": 73,
+      "class_name": "book",
+      "confidence": 0.204,
+      "bin_type": "UNKNOWN",
+      "box": [
+        134,
+        220,
+        157,
+        271
+      ]
+    }
+  ]
+}

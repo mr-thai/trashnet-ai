@@ -1,0 +1,29 @@
+# Configuration file for waste-to-bin category mapping.
+# 8 classes from MultiTrash v8 mapped to 3 standard sorting bins.
+
+bins:
+  ORGANIC:
+    name: "Hữu cơ"
+    description: "Rác thải hữu cơ dễ phân hủy sinh học (thức ăn thừa, rau củ quả, lá cây)"
+    color: "#2E7D32"  # Green
+    classes:
+      - 0  # biowaste
+
+  RECYCLABLE:
+    name: "Tái chế"
+    description: "Rác thải có thể thu hồi tái chế (giấy, nhựa, kim loại, thủy tinh)"
+    color: "#1565C0"  # Blue
+    classes:
+      - 1  # glass
+      - 2  # metal
+      - 4  # paper
+      - 5  # plastic
+
+  RESIDUAL:
+    name: "Vô cơ / Khác"
+    description: "Rác thải khó tái chế hoặc còn lại (xốp styrofoam, bao bì nilon bẩn, tạp chất)"
+    color: "#C62828"  # Orange/Red
+    classes:
+      - 3  # other
+      - 6  # styrofoam
+      - 7  # wrapper

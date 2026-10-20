@@ -1,0 +1,72 @@
+# Guidelines for preparing waste before sorting (US-4.3)
+# Covers all 8 MultiTrash dataset classes in clear, accessible Vietnamese.
+
+guidelines:
+  biowaste:
+    title: "Rác hữu cơ"
+    tip: "Chắt ráo nước và tách riêng đồ nhựa"
+    steps:
+      - "Chắt ráo hết nước và chất lỏng thừa trước khi bỏ vào thùng."
+      - "Loại bỏ hoàn toàn túi nilon, màng bọc thực phẩm, tăm tre hoặc thìa đĩa nhựa."
+      - "Nên bọc bằng túi sinh học tự phân hủy hoặc giấy báo cũ."
+
+  glass:
+    title: "Chai lọ thủy tinh"
+    tip: "Tráng sạch cặn bẩn, tháo nắp và tránh làm vỡ"
+    steps:
+      - "Đổ hết chất lỏng và tráng sơ bằng nước sạch để tránh mùi hôi."
+      - "Tháo rời nắp chai bằng kim loại hoặc nhựa để phân loại riêng."
+      - "Để riêng đồ thủy tinh nguyên vẹn; nếu vỡ cần gói kỹ bằng bìa các-tông để bảo vệ công nhân thu gom."
+
+  metal:
+    title: "Kim loại / Vỏ lon"
+    tip: "Đổ sạch nước và bẹp vỏ lon để tiết kiệm chỗ"
+    steps:
+      - "Rửa sạch cặn đồ uống hoặc dầu mỡ thực phẩm bên trong lon."
+      - "Bóp bẹp lon nhôm để giảm thể tích chứa trong thùng rác."
+      - "Gập phần nắp giật vào bên trong để tránh cứa đứt tay."
+
+  other:
+    title: "Rác vô cơ khác"
+    tip: "Gói gọn gàng và không bỏ lẫn rác nguy hại"
+    steps:
+      - "Buộc kín trong túi đựng rác sinh hoạt thông thường."
+      - "Tuyệt đối không bỏ lẫn pin, đồ điện tử hoặc hóa chất ăn mòn."
+
+  paper:
+    title: "Giấy / Bìa các-tông"
+    tip: "Giữ khô ráo và gỡ bỏ băng dính"
+    steps:
+      - "Giữ giấy luôn khô ráo, tuyệt đối không để dính nước hoặc dầu mỡ thực phẩm."
+      - "Bóc gỡ băng dính nhựa, ghim sắt bấm và màng nilon bọc bìa."
+      - "Gấp phẳng thùng các-tông hoặc xếp chồng giấy gọn gàng."
+
+  plastic:
+    title: "Nhựa / Chai nhựa"
+    tip: "Đổ hết nước, tháo nắp và bóp bẹp chai"
+    steps:
+      - "Đổ sạch hoàn toàn chất lỏng thừa và súc rửa sơ qua."
+      - "Tháo rời nắp chai và vòng đệm nhựa nếu có."
+      - "Bóp bẹp thân chai nhựa PET để tiết kiệm thể tích thùng chứa."
+
+  styrofoam:
+    title: "Xốp / Hộp xốp"
+    tip: "Gạt sạch dầu mỡ thức ăn thừa"
+    steps:
+      - "Gạt bỏ toàn bộ thức ăn thừa và tráng sạch dầu mỡ dính trên hộp xốp."
+      - "Bẻ nhỏ hoặc xếp lồng các hộp vào nhau để tránh cồng kềnh."
+      - "Hộp xốp dính quá nhiều dầu mỡ không thể rửa sạch cần bỏ vào thùng rác vô cơ."
+
+  wrapper:
+    title: "Bao bì màng / Túi nilon"
+    tip: "Giũ sạch vụn bánh kẹo và cuộn chặt"
+    steps:
+      - "Giũ sạch vụn thức ăn, gia vị thừa hoặc bụi bẩn bên trong bao bì."
+      - "Để khô ráo và cuộn chặt hoặc nhét vào một túi nilon lớn để tránh bị gió thổi bay."
+
+  unknown:
+    title: "Vật thể lạ / Cần kiểm tra"
+    tip: "Kiểm tra kỹ nhãn mác trước khi phân loại"
+    steps:
+      - "Đọc kỹ ký hiệu tái chế in dưới đáy bao bì hoặc hướng dẫn của nhà sản xuất."
+      - "Nếu là pin, sạc dự phòng, đèn huỳnh quang hoặc hóa chất, vui lòng mang đến điểm thu gom rác nguy hại."
