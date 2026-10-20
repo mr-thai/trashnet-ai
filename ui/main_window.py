@@ -72,6 +72,11 @@ class MainWindow(QMainWindow):
         self._webcam_worker: Optional[InferenceWorker] = None
         self.webcam_thread = WebcamThread(self)
 
+        # Performance metrics (US-3.4)
+        self._capture_fps: float = 0.0
+        self._inference_fps: float = 0.0
+        self._inference_latency_ms: float = 0.0
+
         self._init_ui()
         self._connect_signals()
         self._init_status_bar()
@@ -160,6 +165,7 @@ class MainWindow(QMainWindow):
 
         self.webcam_thread.frame_received.connect(self.on_webcam_frame_received)
         self.webcam_thread.state_changed.connect(self.on_webcam_state_changed)
+        self.webcam_thread.fps_updated.connect(self.on_capture_fps_updated)
         self.webcam_thread.camera_error.connect(self.on_webcam_error)
 
         # Drag & Drop signals from VideoView
@@ -173,11 +179,25 @@ class MainWindow(QMainWindow):
 
     @Slot(int)
     def on_start_webcam(self, camera_index: int) -> None:
-        """Start streaming from chosen camera index."""
+        """Start streaming from chosen camera index with size-1 buffer InferenceWorker."""
         # Stop any active static file inference
         if self.current_worker is not None and self.current_worker.isRunning():
             self.current_worker.terminate()
             self.current_worker.wait()
+
+        # Stop any existing webcam worker
+        if self._webcam_worker is not None:
+            self._webcam_worker.stop(timeout_ms=1000)
+            self._webcam_worker = None
+
+        # Initialize continuous InferenceWorker with size-1 buffer (latest-frame-wins)
+        if self.detector is not None:
+            conf = self.control_panel.confidence_threshold
+            self._webcam_worker = InferenceWorker(self.detector, conf=conf, parent=self)
+            self._webcam_worker.finished_inference.connect(self._on_webcam_inference_finished)
+            self._webcam_worker.fps_updated.connect(self.on_inference_fps_updated)
+            self._webcam_worker.error_occurred.connect(self._on_webcam_inference_error)
+            self._webcam_worker.start()
 
         self.status_bar.showMessage(f"Đang kết nối camera #{camera_index} qua V4L2...")
         success = self.webcam_thread.start_capture(camera_index=camera_index)
@@ -200,13 +220,11 @@ class MainWindow(QMainWindow):
     def on_stop_webcam(self) -> None:
         """Stop webcam stream and completely release hardware device (camera LED off)."""
         self.webcam_thread.stop_capture()
-        if self._webcam_worker is not None and self._webcam_worker.isRunning():
-            self._webcam_worker.wait(1000)
-            if self._webcam_worker.isRunning():
-                self._webcam_worker.terminate()
-                self._webcam_worker.wait(500)
+        if self._webcam_worker is not None:
+            self._webcam_worker.stop(timeout_ms=2000)
             self._webcam_worker = None
-        self._is_inferring_webcam = False
+        self._capture_fps = 0.0
+        self._inference_fps = 0.0
         self.status_bar.showMessage("Webcam đã tắt — Đã giải phóng thiết bị.")
 
     @Slot(str)
@@ -223,38 +241,51 @@ class MainWindow(QMainWindow):
 
     @Slot(np.ndarray)
     def on_webcam_frame_received(self, frame: np.ndarray) -> None:
-        """Handle incoming frame from webcam: render and trigger non-blocking inference."""
+        """Handle incoming frame from webcam: render at camera rate and submit to size-1 buffer."""
         self._current_frame = frame
 
-        # Render current frame with latest detections
+        # Render current frame with latest detections immediately (preserves 30 FPS display)
         self.video_view.set_frame(frame, self._current_detections)
 
-        # Trigger async inference if worker is not busy (drops frames for model, retains full 30 FPS for view)
-        if not self._is_inferring_webcam and self.detector is not None:
-            self._is_inferring_webcam = True
+        # Submit to size-1 buffer (latest frame always overwrites unconsumed frame)
+        if self._webcam_worker is not None and self._webcam_worker.is_worker_running:
             conf = self.control_panel.confidence_threshold
-            if self._webcam_worker is not None and self._webcam_worker.isRunning():
-                return
-            self._webcam_worker = InferenceWorker(self.detector, frame, conf=conf, parent=self)
-            self._webcam_worker.finished_inference.connect(self._on_webcam_inference_finished)
-            self._webcam_worker.error_occurred.connect(self._on_webcam_inference_error)
-            self._webcam_worker.start()
+            self._webcam_worker.submit_frame(frame, conf=conf)
 
     @Slot(np.ndarray, list, float)
     def _on_webcam_inference_finished(self, frame: np.ndarray, detections: List[Detection], latency_ms: float) -> None:
         """Update detection overlay and banner from webcam inference."""
-        self._is_inferring_webcam = False
         self._current_detections = list(detections)
         self.update_results(detections)
-        fps = 1000.0 / latency_ms if latency_ms > 0 else 0.0
-        self.status_bar.showMessage(
-            f"Webcam trực tiếp | Phát hiện {len(detections)} vật thể | Độ trễ: {latency_ms:.1f} ms (~{fps:.1f} FPS)"
+        self._inference_latency_ms = latency_ms
+        self._update_status_bar_metrics()
+
+    @Slot(float)
+    def on_capture_fps_updated(self, fps: float) -> None:
+        """Update measured camera capture FPS."""
+        self._capture_fps = fps
+        self._update_status_bar_metrics()
+
+    @Slot(float)
+    def on_inference_fps_updated(self, fps: float) -> None:
+        """Update measured AI inference FPS."""
+        self._inference_fps = fps
+        self._update_status_bar_metrics()
+
+    def _update_status_bar_metrics(self) -> None:
+        """Format and display real-time dual FPS and detection metrics on the status bar."""
+        det_count = len(self._current_detections)
+        msg = (
+            f"Camera: {self._capture_fps:.1f} FPS | "
+            f"AI: {self._inference_fps:.1f} FPS (Độ trễ: {self._inference_latency_ms:.1f} ms) | "
+            f"Phát hiện: {det_count} vật thể"
         )
+        self.status_bar.showMessage(msg)
 
     @Slot(str)
     def _on_webcam_inference_error(self, err_msg: str) -> None:
         """Handle inference failure during webcam stream."""
-        self._is_inferring_webcam = False
+        pass
 
     # --------------------------------------------------------------------------
     # Static Image & Drag-Drop Handlers
@@ -404,19 +435,13 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Đã đặt lại trạng thái chờ.")
 
     def closeEvent(self, event) -> None:
-        """Ensure webcam hardware and background workers are properly closed and released on window exit."""
-        if hasattr(self, "_webcam_worker") and self._webcam_worker is not None and self._webcam_worker.isRunning():
-            self._webcam_worker.wait(1000)
-            if self._webcam_worker.isRunning():
-                self._webcam_worker.terminate()
-                self._webcam_worker.wait(500)
+        """Ensure both CaptureThread and InferenceWorker halt cleanly within 2 seconds."""
+        if hasattr(self, "_webcam_worker") and self._webcam_worker is not None:
+            self._webcam_worker.stop(timeout_ms=2000)
             self._webcam_worker = None
 
-        if hasattr(self, "current_worker") and self.current_worker is not None and self.current_worker.isRunning():
-            self.current_worker.wait(1000)
-            if self.current_worker.isRunning():
-                self.current_worker.terminate()
-                self.current_worker.wait(500)
+        if hasattr(self, "current_worker") and self.current_worker is not None:
+            self.current_worker.stop(timeout_ms=2000)
             self.current_worker = None
 
         if hasattr(self, "webcam_thread"):

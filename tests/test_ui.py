@@ -538,3 +538,134 @@ class TestWebcamStreamUS33:
 
         assert mock_thread.stop_capture.called
 
+
+class TestConcurrencyModelUS34:
+    """Acceptance and unit tests for US-3.4 (Mô hình đồng thời CaptureThread và InferenceWorker)."""
+
+    def test_size_one_buffer_latest_frame_wins(self, qapp):
+        """DoD AC: Worker chỉ xử lý khung hình mới nhất; khung cũ bị ghi đè không tích tụ độ trễ."""
+        from unittest.mock import MagicMock
+        import time
+        from ui.worker import InferenceWorker
+
+        mock_detector = MagicMock()
+        # Simulate non-zero inference time
+        def mock_detect(frame, conf=None):
+            time.sleep(0.04)
+            return []
+
+        mock_detector.detect.side_effect = mock_detect
+
+        worker = InferenceWorker(detector=mock_detector)
+        worker.start()
+
+        processed_frames = []
+        worker.finished_inference.connect(lambda f, det, lat: processed_frames.append(int(f[0, 0, 0])))
+
+        # Frame 1: identifier = 10
+        f1 = np.full((100, 100, 3), 10, dtype=np.uint8)
+        # Frame 2: identifier = 20
+        f2 = np.full((100, 100, 3), 20, dtype=np.uint8)
+        # Frame 3: identifier = 30
+        f3 = np.full((100, 100, 3), 30, dtype=np.uint8)
+
+        # Submit f1 (worker picks it up)
+        worker.submit_frame(f1)
+        time.sleep(0.01)
+
+        # While worker is busy with f1, rapidly submit f2 and f3
+        worker.submit_frame(f2)
+        worker.submit_frame(f3)  # f3 must overwrite f2 in the size-1 buffer
+
+        # Wait for worker to finish f1 and then f3
+        time.sleep(0.12)
+        worker.stop(timeout_ms=1000)
+        qapp.processEvents()
+
+        # f1 was processed, f2 was dropped, f3 was processed
+        assert 10 in processed_frames
+        assert 30 in processed_frames
+        assert 20 not in processed_frames  # Frame 2 was overwritten (latest-frame-wins)
+
+    def test_status_bar_displays_dual_fps(self, qapp):
+        """DoD AC: Đo FPS thu hình và FPS suy luận, hiển thị trên thanh trạng thái."""
+        win = MainWindow()
+        win.on_capture_fps_updated(29.8)
+        win.on_inference_fps_updated(18.4)
+        win._on_webcam_inference_finished(np.zeros((10, 10, 3), dtype=np.uint8), [], 54.3)
+
+        status_text = win.status_bar.currentMessage()
+        assert "Camera: 29.8 FPS" in status_text
+        assert "AI: 18.4 FPS" in status_text
+        assert "Độ trễ: 54.3 ms" in status_text
+
+    def test_shutdown_within_two_seconds(self, qapp, monkeypatch):
+        """DoD AC: Khi đóng cửa sổ, thì cả hai luồng dừng sạch trong vòng 2 giây."""
+        from unittest.mock import MagicMock
+        import time
+        from ui.qt_compat import QCloseEvent
+        from ui.webcam_thread import CaptureThread
+        from ui.worker import InferenceWorker
+
+        win = MainWindow()
+
+        # Mock detector with fast return
+        mock_detector = MagicMock()
+        mock_detector.detect.return_value = []
+        win.detector = mock_detector
+
+        # Start capture thread with mock VideoCapture
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.read.return_value = (True, np.zeros((480, 640, 3), dtype=np.uint8))
+        monkeypatch.setattr("cv2.VideoCapture", lambda *args, **kwargs: mock_cap)
+
+        win.on_start_webcam(0)
+        qapp.processEvents()
+
+        assert win.webcam_thread.isRunning()
+        assert win._webcam_worker is not None and win._webcam_worker.isRunning()
+
+        # Trigger closeEvent and measure shutdown duration
+        t_start = time.perf_counter()
+        close_event = QCloseEvent()
+        win.closeEvent(close_event)
+        elapsed = time.perf_counter() - t_start
+
+        # Verify stop within 2.0 seconds
+        assert elapsed < 2.0
+        assert not win.webcam_thread.isRunning()
+        assert win._webcam_worker is None
+
+    def test_stress_50_iterations_start_stop_no_deadlock(self, qapp, monkeypatch):
+        """DoD: Kiểm thử dừng/khởi động lặp lại 50 lần để phát hiện đua luồng & không có deadlock."""
+        from unittest.mock import MagicMock
+        from ui.webcam_thread import CaptureThread
+        from ui.worker import InferenceWorker
+
+        mock_detector = MagicMock()
+        mock_detector.detect.return_value = []
+
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.read.return_value = (True, np.zeros((240, 320, 3), dtype=np.uint8))
+        monkeypatch.setattr("cv2.VideoCapture", lambda *args, **kwargs: mock_cap)
+
+        # Run 50 start/stop cycles
+        for i in range(50):
+            worker = InferenceWorker(detector=mock_detector)
+            worker.start()
+
+            cap = CaptureThread()
+            cap.start_capture(0, target_fps=120)
+
+            frame = np.full((100, 100, 3), i % 255, dtype=np.uint8)
+            worker.submit_frame(frame)
+
+            cap.stop_capture()
+            worker.stop(timeout_ms=500)
+
+            assert not cap.isRunning()
+            assert not worker.isRunning()
+
+

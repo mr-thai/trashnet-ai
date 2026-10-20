@@ -67,12 +67,13 @@ def list_available_cameras(max_indices: int = 6) -> List[int]:
     return sorted(list(set(valid_indices)))
 
 
-class WebcamThread(QThread):
-    """Asynchronous video capture thread managing webcam lifecycle and V4L2 capture."""
+class CaptureThread(QThread):
+    """Asynchronous video capture thread managing webcam lifecycle and V4L2 capture (US-3.3 & US-3.4)."""
 
     # Signals
     frame_received = Signal(np.ndarray)   # Emits raw BGR frame from webcam
     state_changed = Signal(str)           # Emits state name ("IDLE", "RUNNING", "PAUSED", "STOPPED")
+    fps_updated = Signal(float)           # Emits measured capture FPS
     camera_error = Signal(str)            # Emits human-readable error description
 
     def __init__(self, parent=None) -> None:
@@ -170,6 +171,8 @@ class WebcamThread(QThread):
         self._set_state(CameraState.RUNNING)
         frame_interval = 1.0 / self._target_fps
         consecutive_read_failures = 0
+        frame_count = 0
+        fps_start_time = time.perf_counter()
 
         # 2. Main acquisition loop
         while self._running:
@@ -197,6 +200,15 @@ class WebcamThread(QThread):
             consecutive_read_failures = 0
             self.frame_received.emit(frame)
 
+            # Compute and emit capture FPS every 15 frames
+            frame_count += 1
+            if frame_count % 15 == 0:
+                fps_elapsed = time.perf_counter() - fps_start_time
+                if fps_elapsed > 0:
+                    capture_fps = 15.0 / fps_elapsed
+                    self.fps_updated.emit(capture_fps)
+                fps_start_time = time.perf_counter()
+
             # Throttle loop to match target FPS
             elapsed = time.perf_counter() - loop_start
             sleep_time = frame_interval - elapsed
@@ -204,3 +216,7 @@ class WebcamThread(QThread):
                 time.sleep(sleep_time)
 
         self._release_camera()
+
+
+# Backwards compatibility alias
+WebcamThread = CaptureThread
