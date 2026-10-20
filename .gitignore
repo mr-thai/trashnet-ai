@@ -28,6 +28,7 @@ ENV/
 
 # Weights & Datasets
 *.pt
+!models/best.pt
 *.onnx
 runs/
 *.zip
