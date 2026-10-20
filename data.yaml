@@ -1,0 +1,22 @@
+path: MultiTrash
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 8
+names:
+  0: biowaste
+  1: glass
+  2: metal
+  3: other
+  4: paper
+  5: plastic
+  6: styrofoam
+  7: wrapper
+
+roboflow:
+  workspace: myroboflow
+  project: multitrash
+  version: 8
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/myroboflow/multitrash/dataset/8

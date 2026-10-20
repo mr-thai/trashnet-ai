@@ -1,0 +1,9 @@
+class_id,class_name,train_instances,valid_instances,test_instances,total_instances,percentage
+0,biowaste,4413,494,1,4908,14.8059
+1,glass,3065,239,0,3304,9.9671
+2,metal,3241,453,4,3698,11.1557
+3,other,159,38,21,218,0.6576
+4,paper,4833,716,0,5549,16.7396
+5,plastic,6995,878,5,7878,23.7654
+6,styrofoam,2072,178,5,2255,6.8026
+7,wrapper,4808,530,1,5339,16.1061
