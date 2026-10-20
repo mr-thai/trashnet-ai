@@ -11,6 +11,7 @@ try:
     from PyQt6.QtCore import (
         QPoint,
         QRect,
+        QSettings,
         QSize,
         Qt,
         QThread,
@@ -65,6 +66,7 @@ except ImportError:
         from PySide6.QtCore import (  # type: ignore
             QPoint,
             QRect,
+            QSettings,
             QSize,
             Qt,
             QThread,
@@ -148,6 +150,7 @@ __all__ = [
     "QFrame",
     "QLabel",
     "QPushButton",
+    "QSettings",
     "QSlider",
     "QProgressBar",
     "QSplitter",

@@ -18,7 +18,7 @@ from ui.constants import (
     get_vietnamese_label,
 )
 from ui.main_window import MainWindow
-from ui.qt_compat import QApplication
+from ui.qt_compat import QApplication, QSettings
 from ui.widgets.bin_banner import BinBanner
 from ui.widgets.control_panel import ControlPanel
 from ui.widgets.result_card import ResultCard, ResultList
@@ -153,19 +153,66 @@ class TestVideoView:
 
 
 class TestControlPanel:
-    """Verify ControlPanel user interaction elements."""
+    """Verify ControlPanel user interaction elements (US-3.1, US-4.1)."""
 
     def test_default_confidence_and_slider(self, qapp):
-        """Test default confidence threshold and slider bounds."""
-        panel = ControlPanel(default_conf=0.25)
-        assert abs(panel.confidence_threshold - 0.25) < 0.01
+        """Test default confidence threshold 0.60 and slider bounds [0.10, 0.95] with step 0.05."""
+        panel = ControlPanel(use_settings=False)
+        assert abs(panel.confidence_threshold - 0.60) < 0.01
+        assert panel._slider.minimum() == 2   # 2 * 0.05 = 0.10
+        assert panel._slider.maximum() == 19  # 19 * 0.05 = 0.95
+        assert panel._slider.singleStep() == 1  # 0.05 step
+        assert panel._conf_val_label.text() == "0.60"
 
-        # Test slider emission
+    def test_slider_change_emits_and_updates_label(self, qapp):
+        """DoD AC: Khi kéo thanh trượt, ngưỡng áp dụng ngay và hiển thị cạnh thanh trượt."""
+        panel = ControlPanel(use_settings=False)
         received = []
         panel.confidence_changed.connect(lambda val: received.append(val))
-        panel._slider.setValue(60)
+
+        # Change to 0.75 (slider index 15)
+        panel._slider.setValue(15)
         assert len(received) == 1
-        assert abs(received[0] - 0.60) < 0.01
+        assert abs(received[0] - 0.75) < 0.01
+        assert panel.confidence_threshold == 0.75
+        assert panel._conf_val_label.text() == "0.75"
+
+    def test_set_confidence_threshold_helper(self, qapp):
+        """Verify programmatic threshold adjustment."""
+        panel = ControlPanel(use_settings=False)
+        panel.set_confidence_threshold(0.80)
+        assert panel.confidence_threshold == 0.80
+        assert panel._slider.value() == 16
+        assert panel._conf_val_label.text() == "0.80"
+
+    def test_qsettings_persistence_us41(self, qapp, tmp_path):
+        """DoD AC: Ngưỡng được ghi nhớ cho lần mở sau qua QSettings."""
+        settings = QSettings(str(tmp_path / "test_settings.ini"), QSettings.Format.IniFormat)
+        settings.clear()
+
+        # Session 1: user opens panel and adjusts threshold to 0.85
+        panel1 = ControlPanel(settings=settings)
+        panel1.set_confidence_threshold(0.85)
+        assert panel1.confidence_threshold == 0.85
+        assert float(settings.value("confidence_threshold")) == 0.85
+
+        # Session 2: next app launch reads remembered threshold
+        panel2 = ControlPanel(settings=settings)
+        assert panel2.confidence_threshold == 0.85
+        assert panel2._conf_val_label.text() == "0.85"
+
+    def test_worker_set_confidence_thread_safe(self, qapp):
+        """US-4.1: Verify InferenceWorker thread-safe confidence updating."""
+        from unittest.mock import MagicMock
+        from ui.worker import InferenceWorker
+        detector = MagicMock()
+        worker = InferenceWorker(detector, conf=0.60)
+        assert worker._conf == 0.60
+        assert worker._pending_conf == 0.60
+
+        worker.set_confidence(0.85)
+        assert worker._conf == 0.85
+        assert worker._pending_conf == 0.85
 
     def test_webcam_toggle_state(self, qapp):
         """Test webcam button toggle state and state machine updates."""

@@ -13,6 +13,7 @@ from ui.qt_compat import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSettings,
     QSlider,
     Qt,
     Signal,
@@ -20,6 +21,12 @@ from ui.qt_compat import (
     QVBoxLayout,
     QWidget,
 )
+
+CONF_MIN: float = 0.10
+CONF_MAX: float = 0.95
+CONF_STEP: float = 0.05
+DEFAULT_CONF: float = 0.60
+SETTINGS_KEY_CONF: str = "confidence_threshold"
 
 
 class ControlPanel(QFrame):
@@ -41,10 +48,35 @@ class ControlPanel(QFrame):
     # US-3.5 Overlay Toggle Signals
     overlay_options_changed = Signal(bool, bool, bool)  # (show_masks, show_boxes, show_labels)
 
-    def __init__(self, default_conf: float = 0.25, parent: Optional[QWidget] = None) -> None:
+    # US-4.4 Flagging & Hazardous Signal
+    flag_requested = Signal()
+
+    def __init__(
+        self,
+        default_conf: float = DEFAULT_CONF,
+        parent: Optional[QWidget] = None,
+        use_settings: bool = True,
+        settings: Optional[QSettings] = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("ControlPanel")
-        self._default_conf = default_conf
+        self._use_settings = use_settings
+        self._settings = (
+            settings
+            if settings is not None
+            else (QSettings("TrashNet", "TrashNetApp") if use_settings else None)
+        )
+
+        initial_conf = default_conf
+        if self._use_settings and self._settings is not None and default_conf == DEFAULT_CONF:
+            saved_conf = self._settings.value(SETTINGS_KEY_CONF, None)
+            if saved_conf is not None:
+                try:
+                    initial_conf = float(saved_conf)
+                except (ValueError, TypeError):
+                    initial_conf = default_conf
+
+        self._current_conf = max(CONF_MIN, min(CONF_MAX, initial_conf))
         self._webcam_active = False
         self._is_paused = False
 
@@ -123,8 +155,31 @@ class ControlPanel(QFrame):
         self._btn_pause.clicked.connect(self._on_pause_clicked)
         self._apply_button_style(self._btn_pause, primary=False)
 
+        # US-4.4 Flag / Report Button
+        self._btn_flag = QPushButton("⚠️ Báo cáo / Gắn cờ")
+        self._btn_flag.setToolTip("Lưu khung hình và đánh dấu rác nguy hại / không chắc chắn (thư mục flagged/)")
+        self._btn_flag.clicked.connect(self.flag_requested.emit)
+        self._btn_flag.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #78350F;
+                color: #FEF3C7;
+                font-weight: 600;
+                border: 1px solid #D97706;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #92400E;
+                color: #FFFFFF;
+            }
+            """
+        )
+
         grid_layout.addWidget(self._btn_webcam, 1, 0)
         grid_layout.addWidget(self._btn_pause, 2, 0, 1, 2)
+        grid_layout.addWidget(self._btn_flag, 3, 0, 1, 2)
         main_layout.addLayout(grid_layout)
 
         # 3. Confidence Threshold Slider section
@@ -135,20 +190,24 @@ class ControlPanel(QFrame):
         slider_title = QLabel("Ngưỡng tin cậy (Confidence):")
         slider_title.setStyleSheet("font-size: 12px; color: #9CA3AF;")
 
-        pct_val = int(round(self._default_conf * 100))
-        self._conf_val_label = QLabel(f"{pct_val}%")
+        self._conf_val_label = QLabel(f"{self._current_conf:.2f}")
         self._conf_val_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #3B82F6;")
         slider_header.addWidget(slider_title)
         slider_header.addStretch()
         slider_header.addWidget(self._conf_val_label)
         slider_container.addLayout(slider_header)
 
-        # Slider: 5% to 95%
+        # Slider: 0.10 (idx 2) to 0.95 (idx 19), step 0.05 (idx 1)
         self._slider = QSlider(Qt.Orientation.Horizontal)
-        self._slider.setRange(5, 95)
-        self._slider.setValue(pct_val)
+        min_idx = int(round(CONF_MIN / CONF_STEP))
+        max_idx = int(round(CONF_MAX / CONF_STEP))
+        self._slider.setRange(min_idx, max_idx)
+        self._slider.setSingleStep(1)
+        self._slider.setPageStep(2)
+        initial_slider_val = int(round(self._current_conf / CONF_STEP))
+        self._slider.setValue(initial_slider_val)
         self._slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self._slider.setTickInterval(15)
+        self._slider.setTickInterval(2)
         self._slider.valueChanged.connect(self._on_slider_changed)
         self._slider.setStyleSheet(
             """
@@ -305,8 +364,14 @@ class ControlPanel(QFrame):
 
     @property
     def confidence_threshold(self) -> float:
-        """Get the current confidence threshold fraction [0.05, 0.95]."""
-        return self._slider.value() / 100.0
+        """Get the current confidence threshold fraction [0.10, 0.95]."""
+        return round(self._slider.value() * CONF_STEP, 2)
+
+    def set_confidence_threshold(self, conf: float) -> None:
+        """Programmatically set confidence threshold and update slider position."""
+        clamped = max(CONF_MIN, min(CONF_MAX, conf))
+        slider_val = int(round(clamped / CONF_STEP))
+        self._slider.setValue(slider_val)
 
     @property
     def is_webcam_active(self) -> bool:
@@ -320,9 +385,12 @@ class ControlPanel(QFrame):
         return data if data is not None else 0
 
     def _on_slider_changed(self, value: int) -> None:
-        """Handle confidence slider position change."""
-        self._conf_val_label.setText(f"{value}%")
-        self.confidence_changed.emit(value / 100.0)
+        """Handle confidence slider position change (US-4.1)."""
+        self._current_conf = round(value * CONF_STEP, 2)
+        self._conf_val_label.setText(f"{self._current_conf:.2f}")
+        if self._use_settings and self._settings is not None:
+            self._settings.setValue(SETTINGS_KEY_CONF, self._current_conf)
+        self.confidence_changed.emit(self._current_conf)
 
     def _on_webcam_clicked(self) -> None:
         """Toggle Start / Stop webcam state."""

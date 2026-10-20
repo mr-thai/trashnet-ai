@@ -13,6 +13,9 @@ import cv2
 import numpy as np
 
 from core.detector import WasteDetector
+from core.flagging import save_flagged_frame
+from core.ood import OODDetector
+from core.smoother import TemporalSmoother
 from core.types import Bin, Detection
 from ui.constants import (
     DARK_PALETTE_QSS,
@@ -71,6 +74,7 @@ class MainWindow(QMainWindow):
         self.current_worker: Optional[InferenceWorker] = None
         self._webcam_worker: Optional[InferenceWorker] = None
         self.webcam_thread = WebcamThread(self)
+        self.ood_detector = OODDetector()
 
         # Performance metrics (US-3.4)
         self._capture_fps: float = 0.0
@@ -122,7 +126,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.result_list, stretch=1)
 
         # 2.3 Control Panel (Bottom fixed actions)
-        self.control_panel = ControlPanel(default_conf=0.25, parent=self)
+        self.control_panel = ControlPanel(default_conf=0.60, parent=self)
         right_layout.addWidget(self.control_panel)
 
         self.splitter.addWidget(right_panel)
@@ -157,6 +161,7 @@ class MainWindow(QMainWindow):
         self.control_panel.confidence_changed.connect(self.on_confidence_changed)
         self.control_panel.reset_requested.connect(self.reset_all)
         self.control_panel.overlay_options_changed.connect(self.video_view.set_overlay_options)
+        self.control_panel.flag_requested.connect(self.on_flag_requested)
 
         # Webcam State Machine Signals (US-3.3 Chế độ B)
         self.control_panel.start_webcam_requested.connect(self.on_start_webcam)
@@ -191,13 +196,22 @@ class MainWindow(QMainWindow):
             self._webcam_worker.stop(timeout_ms=1000)
             self._webcam_worker = None
 
-        # Initialize continuous InferenceWorker with size-1 buffer (latest-frame-wins)
+        # Initialize continuous InferenceWorker with size-1 buffer and temporal smoother
         if self.detector is not None:
             conf = self.control_panel.confidence_threshold
-            self._webcam_worker = InferenceWorker(self.detector, conf=conf, parent=self)
+            smoother = TemporalSmoother(
+                window_size=30,
+                stability_threshold_sec=1.5,
+                disappear_timeout_sec=1.0,
+                require_confirmation=True,
+            )
+            self._webcam_worker = InferenceWorker(
+                self.detector, conf=conf, smoother=smoother, parent=self
+            )
             self._webcam_worker.finished_inference.connect(self._on_webcam_inference_finished)
             self._webcam_worker.fps_updated.connect(self.on_inference_fps_updated)
             self._webcam_worker.error_occurred.connect(self._on_webcam_inference_error)
+            self.control_panel.confidence_changed.connect(self._webcam_worker.set_confidence)
             self._webcam_worker.start()
 
         self.status_bar.showMessage(f"Đang kết nối camera #{camera_index} qua V4L2...")
@@ -222,6 +236,10 @@ class MainWindow(QMainWindow):
         """Stop webcam stream and completely release hardware device (camera LED off)."""
         self.webcam_thread.stop_capture()
         if self._webcam_worker is not None:
+            try:
+                self.control_panel.confidence_changed.disconnect(self._webcam_worker.set_confidence)
+            except Exception:
+                pass
             self._webcam_worker.stop(timeout_ms=2000)
             self._webcam_worker = None
         self._capture_fps = 0.0
@@ -396,14 +414,17 @@ class MainWindow(QMainWindow):
 
     @Slot(float)
     def on_confidence_changed(self, threshold: float) -> None:
-        """Handle confidence threshold slider changes."""
-        self.status_bar.showMessage(f"Ngưỡng tin cậy cập nhật: {threshold * 100:.0f}%")
-        if self._current_frame is not None and self.detector is not None and not self.webcam_thread.isRunning():
+        """Handle confidence threshold slider changes (US-4.1)."""
+        self.status_bar.showMessage(f"Ngưỡng tin cậy cập nhật: {threshold:.2f} ({threshold * 100:.0f}%)")
+        if self._webcam_worker is not None and self._webcam_worker.is_worker_running:
+            self._webcam_worker.set_confidence(threshold)
+        elif self._current_frame is not None and self.detector is not None and not self.webcam_thread.isRunning():
             self._start_inference(self._current_frame)
 
     def update_results(self, detections: List[Detection]) -> None:
         """Update detection cards and destination bin banner."""
-        self._current_detections = list(detections)
+        checked = self.ood_detector.check_detections(detections) if hasattr(self, "ood_detector") else detections
+        self._current_detections = list(checked)
         self.result_list.set_detections(self._current_detections)
 
         if not self._current_detections:
@@ -416,6 +437,46 @@ class MainWindow(QMainWindow):
                 f"Phát hiện {len(self._current_detections)} vật thể. "
                 f"Đích đến: {top_detection.bin_type.display_name} ({top_detection.confidence * 100:.1f}%)"
             )
+
+    @Slot()
+    def on_flag_requested(self) -> None:
+        """Handle reporting and hazardous waste tagging (US-4.4)."""
+        if self._current_frame is None:
+            self.status_bar.showMessage("Chưa có khung hình để báo cáo / gắn cờ.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Báo cáo / Gắn cờ",
+            "Bạn có muốn gắn cờ khung hình này là RÁC NGUY HẠI (pin, hóa chất, thiết bị điện tử)?\n\n"
+            "• Bấm 'Yes' để đánh dấu nguy hại (hazardous = True)\n"
+            "• Bấm 'No' để đánh dấu không chắc chắn thông thường (hazardous = False)\n"
+            "• Bấm 'Cancel' để hủy bỏ.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+
+        if reply == QMessageBox.StandardButton.Cancel:
+            return
+
+        is_hazardous = (reply == QMessageBox.StandardButton.Yes)
+        try:
+            img_path, json_path = save_flagged_frame(
+                frame=self._current_frame,
+                detections=self._current_detections,
+                is_hazardous=is_hazardous,
+                note="Báo cáo thủ công từ người dùng",
+            )
+            tag_name = "nguy hại (hazardous)" if is_hazardous else "không chắc chắn"
+            self.status_bar.showMessage(f"Đã lưu khung hình {tag_name} vào: {img_path.name}")
+            QMessageBox.information(
+                self,
+                "Đã lưu báo cáo",
+                f"Đã lưu khung hình thành công!\n\nẢnh: {img_path.name}\nSiêu dữ liệu: {json_path.name}\nThư mục: flagged/",
+            )
+        except Exception as exc:
+            self.status_bar.showMessage(f"Lỗi lưu báo cáo: {exc}")
+            QMessageBox.critical(self, "Lỗi lưu báo cáo", str(exc))
 
     @Slot()
     def reset_all(self) -> None:

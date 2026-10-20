@@ -12,8 +12,9 @@ from typing import List, Optional
 import numpy as np
 
 from core.detector import WasteDetector
+from core.smoother import TemporalSmoother
 from core.types import Detection
-from ui.qt_compat import QThread, Signal
+from ui.qt_compat import QThread, Signal, Slot
 
 
 class InferenceWorker(QThread):
@@ -34,11 +35,13 @@ class InferenceWorker(QThread):
         detector: WasteDetector,
         frame: Optional[np.ndarray] = None,
         conf: Optional[float] = None,
+        smoother: Optional[TemporalSmoother] = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._detector = detector
         self._conf = conf
+        self._smoother = smoother
         self._running = False
         self._single_shot: bool = (frame is not None)
 
@@ -67,7 +70,20 @@ class InferenceWorker(QThread):
             self._pending_frame = frame
             if conf is not None:
                 self._pending_conf = conf
+                self._conf = conf
             self._condition.notify_all()
+
+    @Slot(float)
+    def set_confidence(self, conf: float) -> None:
+        """Thread-safely update detection confidence threshold for subsequent inferences."""
+        with self._condition:
+            self._conf = float(conf)
+            self._pending_conf = float(conf)
+
+    def reset_smoother(self) -> None:
+        """Reset internal temporal smoother state."""
+        if self._smoother is not None:
+            self._smoother.reset()
 
     def stop(self, timeout_ms: int = 2000) -> None:
         """Safely signal the worker to exit and wait up to timeout_ms."""
@@ -75,6 +91,9 @@ class InferenceWorker(QThread):
             self._running = False
             self._pending_frame = None
             self._condition.notify_all()
+
+        if self._smoother is not None:
+            self._smoother.reset()
 
         if self.isRunning():
             self.wait(timeout_ms)
@@ -97,7 +116,7 @@ class InferenceWorker(QThread):
 
                 # Atomically extract latest frame and clear slot
                 frame = self._pending_frame
-                conf = self._pending_conf
+                conf = self._pending_conf if self._pending_conf is not None else self._conf
                 self._pending_frame = None
 
             if frame is None:
@@ -109,6 +128,10 @@ class InferenceWorker(QThread):
 
                 # Heavy CNN computation
                 detections: List[Detection] = self._detector.detect(frame, conf=conf)
+
+                # US-4.2 Temporal smoothing & anti-flickering
+                if self._smoother is not None:
+                    detections = self._smoother.update(detections)
 
                 elapsed_ms = (time.perf_counter() - start_t) * 1000.0
                 fps = 1000.0 / elapsed_ms if elapsed_ms > 0 else 0.0

@@ -14,7 +14,8 @@ class Bin(str, Enum):
     RECYCLABLE = "RECYCLABLE"  # Thùng Tái chế (giấy, nhựa, kim loại, thủy tinh)
     ORGANIC = "ORGANIC"        # Thùng Hữu cơ (thực phẩm, rác hữu cơ)
     RESIDUAL = "RESIDUAL"      # Thùng Vô cơ / Khác (xốp, bao bì màng, rác tạp)
-    UNKNOWN = "UNKNOWN"        # Không xác định (ngoài danh mục huấn luyện)
+    HAZARDOUS = "HAZARDOUS"    # Rác Nguy hại (pin, đồ điện tử, thiết bị rò rỉ)
+    UNKNOWN = "UNKNOWN"        # Không xác định / OOD (ngoài phân phối, cần kiểm tra thủ công)
 
     @property
     def display_name(self) -> str:
@@ -23,6 +24,7 @@ class Bin(str, Enum):
             Bin.RECYCLABLE: "Tái chế",
             Bin.ORGANIC: "Hữu cơ",
             Bin.RESIDUAL: "Vô cơ / Khác",
+            Bin.HAZARDOUS: "Rác nguy hại",
             Bin.UNKNOWN: "Không xác định",
         }
         return names.get(self, "Không xác định")

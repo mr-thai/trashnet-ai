@@ -82,13 +82,21 @@ BIN_STYLES = {
         "badge_bg": "#B71C1C",
         "icon": "🗑️",
     },
-    Bin.UNKNOWN: {
-        "title": "CHƯA XÁC ĐỊNH",
-        "subtitle": "Ngoài danh mục phân loại chính thức",
-        "bg_color": "#4B5563",
+    Bin.HAZARDOUS: {
+        "title": "CẢNH BÁO: RÁC NGUY HẠI",
+        "subtitle": "Pin, đồ điện tử, hóa chất — Cần xử lý theo quy trình riêng!",
+        "bg_color": "#DC2626",
         "text_color": "#FFFFFF",
-        "badge_bg": "#374151",
-        "icon": "❓",
+        "badge_bg": "#991B1B",
+        "icon": "☣️",
+    },
+    Bin.UNKNOWN: {
+        "title": "KHÔNG CHẮC CHẮN — CẦN KIỂM TRA THỦ CÔNG",
+        "subtitle": "Độ tin cậy thấp hoặc ngoài phân phối — Không bỏ thùng thông thường!",
+        "bg_color": "#D97706",
+        "text_color": "#FFFFFF",
+        "badge_bg": "#B45309",
+        "icon": "⚠️",
     },
 }
 
