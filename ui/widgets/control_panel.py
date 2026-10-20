@@ -1,17 +1,17 @@
-"""Application Control Panel widget (US-3.1).
+"""Interactive Control Panel widget for Trash-Net GUI (US-3.1 & US-3.3 Chế độ B).
 
-Provides user controls for opening media files, starting/stopping webcam streaming,
-and adjusting YOLO confidence threshold with real-time feedback.
+Provides user controls for opening media files, webcam streaming state machine
+(Start / Pause / Stop), camera device selection, and confidence threshold adjustment.
 """
 
-from typing import Optional
+from typing import List, Optional
 from ui.qt_compat import (
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSizePolicy,
     QSlider,
     Qt,
     Signal,
@@ -22,44 +22,47 @@ from ui.qt_compat import (
 
 
 class ControlPanel(QFrame):
-    """Control panel for user input actions and inference parameters.
+    """Panel hosting primary action buttons, camera controls, and configuration sliders."""
 
-    Signals:
-        open_image_requested: Emitted when user clicks 'Mở ảnh'.
-        open_video_requested: Emitted when user clicks 'Mở video'.
-        toggle_webcam_requested (bool): Emitted with True (start) or False (stop).
-        confidence_changed (float): Emitted when slider value changes [0.05 - 0.95].
-        reset_requested: Emitted when user clicks 'Đặt lại'.
-    """
-
+    # Existing Signals
     open_image_requested = Signal()
     open_video_requested = Signal()
     toggle_webcam_requested = Signal(bool)
     confidence_changed = Signal(float)
     reset_requested = Signal()
 
+    # US-3.3 Chế độ B Signals
+    start_webcam_requested = Signal(int)   # camera_index
+    pause_webcam_requested = Signal()
+    resume_webcam_requested = Signal()
+    stop_webcam_requested = Signal()
+
     def __init__(self, default_conf: float = 0.25, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("ControlPanel")
         self._default_conf = default_conf
         self._webcam_active = False
+        self._is_paused = False
 
         self._init_ui()
 
     def _init_ui(self) -> None:
-        """Construct buttons, slider, and status layouts."""
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        """Construct control widgets and modern dark layouts."""
+        self.setStyleSheet(
+            """
+            #ControlPanel {
+                background-color: #111827;
+                border: 1px solid #1F2937;
+                border-radius: 8px;
+            }
+            """
+        )
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(14, 14, 14, 14)
-        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(14)
 
-        # Header Title
-        title_label = QLabel("Bảng điều khiển")
-        title_label.setStyleSheet("font-size: 13px; font-weight: 700; color: #D1D5DB;")
-        main_layout.addWidget(title_label)
-
-        # Action Buttons Grid (2x2)
+        # 1. Media Actions Grid
         grid_layout = QGridLayout()
         grid_layout.setSpacing(8)
 
@@ -73,11 +76,6 @@ class ControlPanel(QFrame):
         self._btn_open_vid.clicked.connect(self.open_video_requested.emit)
         self._apply_button_style(self._btn_open_vid, primary=False)
 
-        self._btn_webcam = QPushButton("📹 Bật Webcam")
-        self._btn_webcam.setToolTip("Bật/tắt luồng camera trực tiếp")
-        self._btn_webcam.clicked.connect(self._on_webcam_clicked)
-        self._apply_button_style(self._btn_webcam, primary=True)
-
         self._btn_reset = QPushButton("🔄 Đặt lại")
         self._btn_reset.setToolTip("Xóa ảnh hiện tại và đưa về trạng thái chờ")
         self._btn_reset.clicked.connect(self._on_reset_clicked)
@@ -85,11 +83,47 @@ class ControlPanel(QFrame):
 
         grid_layout.addWidget(self._btn_open_img, 0, 0)
         grid_layout.addWidget(self._btn_open_vid, 0, 1)
-        grid_layout.addWidget(self._btn_webcam, 1, 0)
         grid_layout.addWidget(self._btn_reset, 1, 1)
+
+        # 2. Camera Controls (US-3.3 Chế độ B)
+        cam_select_layout = QHBoxLayout()
+        cam_label = QLabel("Thiết bị Camera:")
+        cam_label.setStyleSheet("font-size: 12px; color: #9CA3AF;")
+        self.camera_combo = QComboBox()
+        self.camera_combo.setStyleSheet("""
+            QComboBox {
+                background: #1F2937;
+                color: #E5E7EB;
+                border: 1px solid #374151;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }
+        """)
+        self.camera_combo.addItem("Camera 0 (Mặc định)", 0)
+        self.camera_combo.addItem("Camera 1 (Phụ)", 1)
+        cam_select_layout.addWidget(cam_label)
+        cam_select_layout.addWidget(self.camera_combo, stretch=1)
+
+        main_layout.addLayout(cam_select_layout)
+
+        # Start / Stop and Pause Buttons
+        self._btn_webcam = QPushButton("▶️ Bật Webcam")
+        self._btn_webcam.setToolTip("Khởi động/Dừng luồng camera trực tiếp")
+        self._btn_webcam.clicked.connect(self._on_webcam_clicked)
+        self._apply_button_style(self._btn_webcam, primary=True)
+
+        self._btn_pause = QPushButton("⏸️ Tạm dừng")
+        self._btn_pause.setToolTip("Tạm dừng hình ảnh và suy luận")
+        self._btn_pause.setEnabled(False)
+        self._btn_pause.clicked.connect(self._on_pause_clicked)
+        self._apply_button_style(self._btn_pause, primary=False)
+
+        grid_layout.addWidget(self._btn_webcam, 1, 0)
+        grid_layout.addWidget(self._btn_pause, 2, 0, 1, 2)
         main_layout.addLayout(grid_layout)
 
-        # Confidence Threshold Slider section
+        # 3. Confidence Threshold Slider section
         slider_container = QVBoxLayout()
         slider_container.setSpacing(6)
 
@@ -124,77 +158,68 @@ class ControlPanel(QFrame):
                 border-radius: 3px;
             }
             QSlider::handle:horizontal {
-                background: #FFFFFF;
-                border: 2px solid #3B82F6;
                 width: 16px;
                 margin-top: -5px;
                 margin-bottom: -5px;
+                background: #F9FAFB;
+                border: 2px solid #3B82F6;
                 border-radius: 8px;
             }
             QSlider::handle:horizontal:hover {
-                background: #93C5FD;
+                background: #60A5FA;
             }
             """
         )
         slider_container.addWidget(self._slider)
         main_layout.addLayout(slider_container)
 
-        # Base panel styling
-        self.setStyleSheet(
-            """
-            QFrame#ControlPanel {
-                background-color: #1F2937;
-                border: 1px solid #374151;
-                border-radius: 10px;
-            }
-            """
-        )
+    def populate_cameras(self, camera_indices: List[int]) -> None:
+        """Update available camera items in dropdown."""
+        self.camera_combo.clear()
+        if not camera_indices:
+            self.camera_combo.addItem("Không tìm thấy camera", -1)
+            return
+        for idx in camera_indices:
+            self.camera_combo.addItem(f"Camera #{idx}", idx)
 
-    def _apply_button_style(self, btn: QPushButton, primary: bool = False) -> None:
-        """Apply modern flat design styling to action buttons."""
-        btn.setFixedHeight(36)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        if primary:
-            btn.setStyleSheet(
+    def set_camera_state(self, state: str) -> None:
+        """Update buttons visually to reflect CameraState machine."""
+        st = state.upper()
+        if st in ("IDLE", "STOPPED"):
+            self._webcam_active = False
+            self._is_paused = False
+            self._btn_webcam.setText("▶️ Bật Webcam")
+            self._apply_button_style(self._btn_webcam, primary=True)
+            self._btn_pause.setText("⏸️ Tạm dừng")
+            self._btn_pause.setEnabled(False)
+            self.camera_combo.setEnabled(True)
+        elif st == "RUNNING":
+            self._webcam_active = True
+            self._is_paused = False
+            self._btn_webcam.setText("⏹️ Dừng Webcam")
+            self._btn_webcam.setStyleSheet(
                 """
                 QPushButton {
-                    background-color: #2563EB;
-                    color: #FFFFFF;
-                    font-size: 12px;
-                    font-weight: 700;
+                    background-color: #DC2626;
+                    color: white;
+                    font-weight: 600;
                     border: none;
                     border-radius: 6px;
-                    padding: 0px 12px;
+                    padding: 8px 14px;
+                    font-size: 13px;
                 }
                 QPushButton:hover {
-                    background-color: #1D4ED8;
-                }
-                QPushButton:pressed {
-                    background-color: #1E40AF;
+                    background-color: #B91C1C;
                 }
                 """
             )
-        else:
-            btn.setStyleSheet(
-                """
-                QPushButton {
-                    background-color: #374151;
-                    color: #F3F4F6;
-                    font-size: 12px;
-                    font-weight: 600;
-                    border: 1px solid #4B5563;
-                    border-radius: 6px;
-                    padding: 0px 12px;
-                }
-                QPushButton:hover {
-                    background-color: #4B5563;
-                    border-color: #6B7280;
-                }
-                QPushButton:pressed {
-                    background-color: #1F2937;
-                }
-                """
-            )
+            self._btn_pause.setText("⏸️ Tạm dừng")
+            self._btn_pause.setEnabled(True)
+            self.camera_combo.setEnabled(False)
+        elif st == "PAUSED":
+            self._is_paused = True
+            self._btn_pause.setText("▶️ Tiếp tục")
+            self._btn_pause.setEnabled(True)
 
     @property
     def confidence_threshold(self) -> float:
@@ -206,45 +231,86 @@ class ControlPanel(QFrame):
         """Check if webcam streaming is currently turned on."""
         return self._webcam_active
 
-    @Slot(int)
+    @property
+    def selected_camera_index(self) -> int:
+        """Return currently chosen camera device index."""
+        data = self.camera_combo.currentData()
+        return data if data is not None else 0
+
     def _on_slider_changed(self, value: int) -> None:
         """Handle confidence slider position change."""
         self._conf_val_label.setText(f"{value}%")
         self.confidence_changed.emit(value / 100.0)
 
-    @Slot()
     def _on_webcam_clicked(self) -> None:
-        """Toggle webcam state and update button label."""
-        self._webcam_active = not self._webcam_active
+        """Toggle Start / Stop webcam state."""
+        if not self._webcam_active:
+            cam_idx = self.selected_camera_index
+            self.start_webcam_requested.emit(cam_idx)
+            self.toggle_webcam_requested.emit(True)
+        else:
+            self.stop_webcam_requested.emit()
+            self.toggle_webcam_requested.emit(False)
+
+    def _on_pause_clicked(self) -> None:
+        """Toggle Pause / Resume."""
+        if not self._is_paused:
+            self.pause_webcam_requested.emit()
+        else:
+            self.resume_webcam_requested.emit()
+
+    def _on_reset_clicked(self) -> None:
+        """Reset controls and webcam status."""
         if self._webcam_active:
-            self._btn_webcam.setText("⏹️ Dừng Webcam")
-            self._btn_webcam.setStyleSheet(
+            self.stop_webcam_requested.emit()
+            self.toggle_webcam_requested.emit(False)
+        self.reset_requested.emit()
+
+    def _apply_button_style(self, button: QPushButton, primary: bool = False) -> None:
+        """Apply sleek modern theme styling to push buttons."""
+        if primary:
+            button.setStyleSheet(
                 """
                 QPushButton {
-                    background-color: #DC2626;
-                    color: #FFFFFF;
-                    font-size: 12px;
-                    font-weight: 700;
+                    background-color: #2563EB;
+                    color: white;
+                    font-weight: 600;
                     border: none;
                     border-radius: 6px;
+                    padding: 8px 14px;
+                    font-size: 13px;
                 }
                 QPushButton:hover {
-                    background-color: #B91C1C;
+                    background-color: #1D4ED8;
+                }
+                QPushButton:pressed {
+                    background-color: #1E40AF;
                 }
                 """
             )
         else:
-            self._btn_webcam.setText("📹 Bật Webcam")
-            self._apply_button_style(self._btn_webcam, primary=True)
-
-        self.toggle_webcam_requested.emit(self._webcam_active)
-
-    @Slot()
-    def _on_reset_clicked(self) -> None:
-        """Reset controls and webcam status."""
-        if self._webcam_active:
-            self._webcam_active = False
-            self._btn_webcam.setText("📹 Bật Webcam")
-            self._apply_button_style(self._btn_webcam, primary=True)
-            self.toggle_webcam_requested.emit(False)
-        self.reset_requested.emit()
+            button.setStyleSheet(
+                """
+                QPushButton {
+                    background-color: #1F2937;
+                    color: #E5E7EB;
+                    font-weight: 500;
+                    border: 1px solid #374151;
+                    border-radius: 6px;
+                    padding: 8px 14px;
+                    font-size: 13px;
+                }
+                QPushButton:hover {
+                    background-color: #374151;
+                    color: #FFFFFF;
+                }
+                QPushButton:pressed {
+                    background-color: #4B5563;
+                }
+                QPushButton:disabled {
+                    background-color: #111827;
+                    color: #4B5563;
+                    border-color: #1F2937;
+                }
+                """
+            )

@@ -20,6 +20,7 @@ try:
     )
     from PyQt6.QtGui import (
         QBrush,
+        QCloseEvent,
         QColor,
         QDragEnterEvent,
         QDragMoveEvent,
@@ -35,6 +36,7 @@ try:
     )
     from PyQt6.QtWidgets import (
         QApplication,
+        QComboBox,
         QFileDialog,
         QFrame,
         QGridLayout,
@@ -71,6 +73,7 @@ except ImportError:
         )
         from PySide6.QtGui import (  # type: ignore
             QBrush,
+            QCloseEvent,
             QColor,
             QDragEnterEvent,
             QDragMoveEvent,
@@ -86,6 +89,7 @@ except ImportError:
         )
         from PySide6.QtWidgets import (  # type: ignore
             QApplication,
+            QComboBox,
             QFileDialog,
             QFrame,
             QGridLayout,
@@ -131,6 +135,7 @@ __all__ = [
     "QPainter",
     "QPen",
     "QBrush",
+    "QCloseEvent",
     "QPolygon",
     "QIcon",
     "QKeySequence",

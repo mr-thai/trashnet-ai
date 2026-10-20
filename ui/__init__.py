@@ -1,8 +1,14 @@
-"""Trash-Net User Interface Package (Sprint 3).
-
-Provides modern, decoupled PyQt6/PySide6 UI components for waste classification.
+"""UI presentation layer for Trash-Net Desktop application.
 """
 
 from ui.main_window import MainWindow
+from ui.utils import FILE_DIALOG_IMAGE_FILTER, VALID_IMAGE_EXTENSIONS, load_image_unicode
+from ui.worker import InferenceWorker
 
-__all__ = ["MainWindow"]
+__all__ = [
+    "MainWindow",
+    "InferenceWorker",
+    "load_image_unicode",
+    "VALID_IMAGE_EXTENSIONS",
+    "FILE_DIALOG_IMAGE_FILTER",
+]

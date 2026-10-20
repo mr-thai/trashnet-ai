@@ -1,14 +1,18 @@
-"""Main application window for Trash-Net waste classification (US-3.1).
+"""Main application window for Trash-Net waste classification (US-3.1, US-3.3 Static & Webcam).
 
-Integrates VideoView, BinBanner, ResultList, and ControlPanel within a responsive
-QSplitter layout complying with DoD >= 1280x720.
+Integrates VideoView, BinBanner, ResultList, ControlPanel, and WebcamThread
+within a responsive QSplitter layout complying with DoD >= 1280x720.
+Supports Drag & Drop, real-time Webcam state machine (Idle -> Running -> Paused -> Stopped),
+V4L2 backend capture, and background inference without memory leaks.
 """
 
 from pathlib import Path
 import sys
 from typing import List, Optional
 import cv2
+import numpy as np
 
+from core.detector import WasteDetector
 from core.types import Bin, Detection
 from ui.constants import (
     DARK_PALETTE_QSS,
@@ -22,6 +26,7 @@ from ui.qt_compat import (
     QFrame,
     QHBoxLayout,
     QMainWindow,
+    QMessageBox,
     QSize,
     QSplitter,
     QStatusBar,
@@ -30,23 +35,19 @@ from ui.qt_compat import (
     QVBoxLayout,
     QWidget,
 )
+from ui.utils import FILE_DIALOG_IMAGE_FILTER, load_image_unicode
+from ui.webcam_thread import CameraState, WebcamThread, list_available_cameras
 from ui.widgets.bin_banner import BinBanner
 from ui.widgets.control_panel import ControlPanel
 from ui.widgets.result_card import ResultList
 from ui.widgets.video_view import VideoView
+from ui.worker import InferenceWorker
 
 
 class MainWindow(QMainWindow):
-    """Primary GUI window for Trash-Net waste classification.
+    """Primary GUI window for Trash-Net waste classification."""
 
-    Attributes:
-        video_view (VideoView): Left-hand panel aspect-ratio preserving display.
-        bin_banner (BinBanner): Prominent top-right sorting bin alert.
-        result_list (ResultList): Scrollable list of recognized waste categories.
-        control_panel (ControlPanel): Bottom-right action and confidence sliders.
-    """
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, model_path: Optional[str] = "yolo11n-seg.pt", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(DEFAULT_WINDOW_TITLE)
 
@@ -55,11 +56,27 @@ class MainWindow(QMainWindow):
         self.resize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
 
         self._current_image_path: Optional[Path] = None
+        self._current_frame: Optional[np.ndarray] = None
         self._current_detections: List[Detection] = []
+        self._is_inferring_webcam: bool = False
+
+        # Load detector if weights exist
+        self.detector: Optional[WasteDetector] = None
+        if model_path and Path(model_path).exists():
+            try:
+                self.detector = WasteDetector(model_path=model_path)
+            except Exception as exc:
+                print(f"[!] Warning: Could not initialize WasteDetector with '{model_path}': {exc}")
+
+        self.current_worker: Optional[InferenceWorker] = None
+        self.webcam_thread = WebcamThread(self)
 
         self._init_ui()
         self._connect_signals()
         self._init_status_bar()
+
+        # Discover connected cameras
+        self._refresh_cameras()
 
         # Apply global dark styling
         self.setStyleSheet(DARK_PALETTE_QSS)
@@ -73,11 +90,11 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(12, 12, 12, 12)
         root_layout.setSpacing(0)
 
-        # Horizontal Splitter between Left (Video) and Right (Results & Controls)
+        # Horizontal Splitter between Left (Video/Drop Canvas) and Right (Results & Controls)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setObjectName("MainSplitter")
 
-        # 1. Left Viewport: Aspect-Ratio Preserving Video/Image View
+        # 1. Left Viewport: Aspect-Ratio Preserving Video/Image View with Drag-and-Drop
         self.video_view = VideoView(self)
         self.splitter.addWidget(self.video_view)
 
@@ -115,24 +132,132 @@ class MainWindow(QMainWindow):
         """Initialize bottom status bar."""
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Hệ thống sẵn sàng | Độ phân giải: 1280×720 | Chờ nguồn dữ liệu")
+        dev = self.detector.device.upper() if self.detector else "CPU"
+        self.status_bar.showMessage(f"Hệ thống sẵn sàng | Thiết bị: {dev} | Chờ nguồn dữ liệu")
+
+    def _refresh_cameras(self) -> None:
+        """Scan available system cameras and populate dropdown."""
+        try:
+            cameras = list_available_cameras()
+            self.control_panel.populate_cameras(cameras)
+        except Exception:
+            self.control_panel.populate_cameras([0])
 
     def _connect_signals(self) -> None:
-        """Wire up user interaction signals from ControlPanel."""
+        """Wire up user interaction signals from ControlPanel, VideoView, and WebcamThread."""
         self.control_panel.open_image_requested.connect(self.open_image_dialog)
         self.control_panel.open_video_requested.connect(self.open_video_dialog)
         self.control_panel.toggle_webcam_requested.connect(self.on_toggle_webcam)
         self.control_panel.confidence_changed.connect(self.on_confidence_changed)
         self.control_panel.reset_requested.connect(self.reset_all)
 
+        # Webcam State Machine Signals (US-3.3 Chế độ B)
+        self.control_panel.start_webcam_requested.connect(self.on_start_webcam)
+        self.control_panel.pause_webcam_requested.connect(self.on_pause_webcam)
+        self.control_panel.resume_webcam_requested.connect(self.on_resume_webcam)
+        self.control_panel.stop_webcam_requested.connect(self.on_stop_webcam)
+
+        self.webcam_thread.frame_received.connect(self.on_webcam_frame_received)
+        self.webcam_thread.state_changed.connect(self.on_webcam_state_changed)
+        self.webcam_thread.camera_error.connect(self.on_webcam_error)
+
+        # Drag & Drop signals from VideoView
+        self.video_view.image_dropped.connect(self.load_image_file)
+        self.video_view.file_rejected.connect(self.on_file_rejected)
+        self.video_view.multiple_files_warning.connect(self.on_multiple_files_warning)
+
+    # --------------------------------------------------------------------------
+    # Webcam Lifecycle Handlers (US-3.3 Chế độ B)
+    # --------------------------------------------------------------------------
+
+    @Slot(int)
+    def on_start_webcam(self, camera_index: int) -> None:
+        """Start streaming from chosen camera index."""
+        # Stop any active static file inference
+        if self.current_worker is not None and self.current_worker.isRunning():
+            self.current_worker.terminate()
+            self.current_worker.wait()
+
+        self.status_bar.showMessage(f"Đang kết nối camera #{camera_index} qua V4L2...")
+        success = self.webcam_thread.start_capture(camera_index=camera_index)
+        if not success:
+            self.status_bar.showMessage(f"Lỗi: Không thể khởi chạy camera #{camera_index}.")
+
+    @Slot()
+    def on_pause_webcam(self) -> None:
+        """Pause webcam streaming: hold last frame and pause inference."""
+        self.webcam_thread.pause_capture()
+        self.status_bar.showMessage("Webcam tạm dừng — Giữ khung hình hiện tại.")
+
+    @Slot()
+    def on_resume_webcam(self) -> None:
+        """Resume webcam streaming."""
+        self.webcam_thread.resume_capture()
+        self.status_bar.showMessage("Webcam tiếp tục phát trực tiếp.")
+
+    @Slot()
+    def on_stop_webcam(self) -> None:
+        """Stop webcam stream and completely release hardware device (camera LED off)."""
+        self.webcam_thread.stop_capture()
+        self.status_bar.showMessage("Webcam đã tắt — Đã giải phóng thiết bị.")
+
+    @Slot(str)
+    def on_webcam_state_changed(self, state: str) -> None:
+        """Synchronize UI buttons with camera state machine."""
+        self.control_panel.set_camera_state(state)
+
+    @Slot(str)
+    def on_webcam_error(self, error_message: str) -> None:
+        """Handle camera device errors or disconnection mid-stream."""
+        self.status_bar.showMessage(f"Sự cố camera: {error_message}")
+        self.control_panel.set_camera_state(CameraState.STOPPED.value)
+        QMessageBox.warning(self, "Lỗi kết nối Camera", error_message)
+
+    @Slot(np.ndarray)
+    def on_webcam_frame_received(self, frame: np.ndarray) -> None:
+        """Handle incoming frame from webcam: render and trigger non-blocking inference."""
+        self._current_frame = frame
+
+        # Render current frame with latest detections
+        self.video_view.set_frame(frame, self._current_detections)
+
+        # Trigger async inference if worker is not busy (drops frames for model, retains full 30 FPS for view)
+        if not self._is_inferring_webcam and self.detector is not None:
+            self._is_inferring_webcam = True
+            conf = self.control_panel.confidence_threshold
+            worker = InferenceWorker(self.detector, frame, conf=conf)
+            worker.finished_inference.connect(self._on_webcam_inference_finished)
+            worker.error_occurred.connect(self._on_webcam_inference_error)
+            worker.start()
+
+    @Slot(np.ndarray, list, float)
+    def _on_webcam_inference_finished(self, frame: np.ndarray, detections: List[Detection], latency_ms: float) -> None:
+        """Update detection overlay and banner from webcam inference."""
+        self._is_inferring_webcam = False
+        self._current_detections = list(detections)
+        self.update_results(detections)
+        fps = 1000.0 / latency_ms if latency_ms > 0 else 0.0
+        self.status_bar.showMessage(
+            f"Webcam trực tiếp | Phát hiện {len(detections)} vật thể | Độ trễ: {latency_ms:.1f} ms (~{fps:.1f} FPS)"
+        )
+
+    @Slot(str)
+    def _on_webcam_inference_error(self, err_msg: str) -> None:
+        """Handle inference failure during webcam stream."""
+        self._is_inferring_webcam = False
+
+    # --------------------------------------------------------------------------
+    # Static Image & Drag-Drop Handlers
+    # --------------------------------------------------------------------------
+
     @Slot()
     def open_image_dialog(self) -> None:
-        """Present file chooser dialog for static images."""
+        """Present file chooser dialog for static images with restricted formats."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Chọn tệp ảnh rác",
             "",
-            "Hình ảnh (*.jpg *.jpeg *.png *.bmp *.webp);;Tất cả tệp (*.*)",
+            FILE_DIALOG_IMAGE_FILTER,
         )
         if not file_path:
             return
@@ -140,29 +265,73 @@ class MainWindow(QMainWindow):
         self.load_image_file(Path(file_path))
 
     def load_image_file(self, path: Path) -> bool:
-        """Load and display an image from file path.
+        """Load and display an image from file path with Unicode support and run inference."""
+        # Stop webcam if active when user opens an image
+        if self.webcam_thread.current_state in (CameraState.RUNNING, CameraState.PAUSED):
+            self.on_stop_webcam()
 
-        Args:
-            path: Path to image file.
-
-        Returns:
-            bool: True if image loaded successfully, False otherwise.
-        """
-        if not path.exists():
-            self.status_bar.showMessage(f"Lỗi: Không tìm thấy tệp '{path}'")
-            return False
-
-        # Read image using OpenCV (BGR format)
-        img = cv2.imread(str(path))
-        if img is None:
-            self.status_bar.showMessage(f"Lỗi: Không thể giải mã ảnh '{path.name}'")
+        try:
+            img = load_image_unicode(path)
+        except Exception as exc:
+            self.status_bar.showMessage(f"Lỗi: Không thể mở ảnh '{path.name}'")
+            QMessageBox.warning(self, "Lỗi đọc tệp ảnh", f"Không thể đọc tệp '{path.name}':\n{exc}")
             return False
 
         self._current_image_path = path
+        self._current_frame = img
         self.video_view.set_frame(img)
         h, w = img.shape[:2]
-        self.status_bar.showMessage(f"Đã mở ảnh: {path.name} ({w}×{h} px)")
+        self.status_bar.showMessage(f"Đã nạp: {path.name} ({w}×{h} px). Đang chạy suy luận...")
+
+        self._start_inference(img)
         return True
+
+    def _start_inference(self, frame: np.ndarray) -> None:
+        """Run inference asynchronously using InferenceWorker."""
+        if self.detector is None:
+            self.status_bar.showMessage("Cảnh báo: Chưa nạp mô hình suy luận.")
+            return
+
+        if self.current_worker is not None and self.current_worker.isRunning():
+            self.current_worker.terminate()
+            self.current_worker.wait()
+
+        conf = self.control_panel.confidence_threshold
+        self.current_worker = InferenceWorker(self.detector, frame, conf=conf)
+        self.current_worker.finished_inference.connect(self._on_inference_finished)
+        self.current_worker.error_occurred.connect(self._on_inference_error)
+        self.current_worker.start()
+
+    @Slot(np.ndarray, list, float)
+    def _on_inference_finished(self, frame: np.ndarray, detections: List[Detection], latency_ms: float) -> None:
+        """Handle results delivered by the background worker thread."""
+        self._current_detections = list(detections)
+        self.video_view.set_frame(frame, detections)
+        self.update_results(detections)
+
+        fps = 1000.0 / latency_ms if latency_ms > 0 else 0.0
+        self.status_bar.showMessage(
+            f"Hoàn tất: Phát hiện {len(detections)} vật thể | Độ trễ: {latency_ms:.1f} ms (~{fps:.1f} FPS)"
+        )
+
+    @Slot(str)
+    def _on_inference_error(self, err_msg: str) -> None:
+        """Handle background worker failure."""
+        self.status_bar.showMessage(f"Lỗi suy luận: {err_msg}")
+        QMessageBox.critical(self, "Lỗi suy luận", f"Gặp sự cố khi phân tích ảnh:\n{err_msg}")
+
+    @Slot(str)
+    def on_file_rejected(self, message: str) -> None:
+        """Notify user when an invalid or corrupt file was dropped."""
+        self.status_bar.showMessage("Định dạng tệp bị từ chối.")
+        QMessageBox.warning(self, "Tệp không hợp lệ", message)
+
+    @Slot(int)
+    def on_multiple_files_warning(self, count: int) -> None:
+        """Notify user when multiple files were dropped."""
+        self.status_bar.showMessage(
+            f"Lưu ý: Bạn đã kéo thả {count} tệp. Ứng dụng chỉ xử lý tệp ảnh đầu tiên."
+        )
 
     @Slot()
     def open_video_dialog(self) -> None:
@@ -180,27 +349,18 @@ class MainWindow(QMainWindow):
 
     @Slot(bool)
     def on_toggle_webcam(self, active: bool) -> None:
-        """Handle webcam toggle events."""
-        if active:
-            self.status_bar.showMessage("Đang kích hoạt camera trực tiếp...")
-        else:
-            self.status_bar.showMessage("Đã dừng webcam.")
+        """Handle legacy toggle webcam signal."""
+        pass
 
     @Slot(float)
     def on_confidence_changed(self, threshold: float) -> None:
         """Handle confidence threshold slider changes."""
         self.status_bar.showMessage(f"Ngưỡng tin cậy cập nhật: {threshold * 100:.0f}%")
+        if self._current_frame is not None and self.detector is not None and not self.webcam_thread.isRunning():
+            self._start_inference(self._current_frame)
 
     def update_results(self, detections: List[Detection]) -> None:
-        """Update detection cards and destination bin banner.
-
-        Acceptance Criteria:
-        - When detections are empty: banner displays 'Chưa phát hiện rác'.
-        - When detections exist: banner displays target bin for top confidence item.
-
-        Args:
-            detections: List of Detection objects sorted descending by confidence.
-        """
+        """Update detection cards and destination bin banner."""
         self._current_detections = list(detections)
         self.result_list.set_detections(self._current_detections)
 
@@ -208,7 +368,6 @@ class MainWindow(QMainWindow):
             self.bin_banner.reset()
             self.status_bar.showMessage("Không phát hiện rác trong khung hình")
         else:
-            # Destination bin corresponding to highest-confidence detection
             top_detection = self._current_detections[0]
             self.bin_banner.set_bin(top_detection.bin_type)
             self.status_bar.showMessage(
@@ -218,13 +377,26 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def reset_all(self) -> None:
-        """Clear loaded frames, results, and reset banner."""
+        """Clear loaded frames, results, reset banner, and stop webcam."""
+        if self.webcam_thread.isRunning():
+            self.on_stop_webcam()
+
+        if self.current_worker is not None and self.current_worker.isRunning():
+            self.current_worker.terminate()
+            self.current_worker.wait()
+
         self.video_view.clear_frame()
         self.result_list.clear()
         self.bin_banner.reset()
         self._current_image_path = None
+        self._current_frame = None
         self._current_detections.clear()
         self.status_bar.showMessage("Đã đặt lại trạng thái chờ.")
+
+    def closeEvent(self, event) -> None:
+        """Ensure webcam hardware is properly closed and released on window exit."""
+        self.webcam_thread.stop_capture()
+        super().closeEvent(event)
 
 
 def run_app() -> None:
