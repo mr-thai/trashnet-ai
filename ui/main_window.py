@@ -69,6 +69,7 @@ class MainWindow(QMainWindow):
                 print(f"[!] Warning: Could not initialize WasteDetector with '{model_path}': {exc}")
 
         self.current_worker: Optional[InferenceWorker] = None
+        self._webcam_worker: Optional[InferenceWorker] = None
         self.webcam_thread = WebcamThread(self)
 
         self._init_ui()
@@ -199,6 +200,13 @@ class MainWindow(QMainWindow):
     def on_stop_webcam(self) -> None:
         """Stop webcam stream and completely release hardware device (camera LED off)."""
         self.webcam_thread.stop_capture()
+        if self._webcam_worker is not None and self._webcam_worker.isRunning():
+            self._webcam_worker.wait(1000)
+            if self._webcam_worker.isRunning():
+                self._webcam_worker.terminate()
+                self._webcam_worker.wait(500)
+            self._webcam_worker = None
+        self._is_inferring_webcam = False
         self.status_bar.showMessage("Webcam đã tắt — Đã giải phóng thiết bị.")
 
     @Slot(str)
@@ -225,10 +233,12 @@ class MainWindow(QMainWindow):
         if not self._is_inferring_webcam and self.detector is not None:
             self._is_inferring_webcam = True
             conf = self.control_panel.confidence_threshold
-            worker = InferenceWorker(self.detector, frame, conf=conf)
-            worker.finished_inference.connect(self._on_webcam_inference_finished)
-            worker.error_occurred.connect(self._on_webcam_inference_error)
-            worker.start()
+            if self._webcam_worker is not None and self._webcam_worker.isRunning():
+                return
+            self._webcam_worker = InferenceWorker(self.detector, frame, conf=conf, parent=self)
+            self._webcam_worker.finished_inference.connect(self._on_webcam_inference_finished)
+            self._webcam_worker.error_occurred.connect(self._on_webcam_inference_error)
+            self._webcam_worker.start()
 
     @Slot(np.ndarray, list, float)
     def _on_webcam_inference_finished(self, frame: np.ndarray, detections: List[Detection], latency_ms: float) -> None:
@@ -394,8 +404,24 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Đã đặt lại trạng thái chờ.")
 
     def closeEvent(self, event) -> None:
-        """Ensure webcam hardware is properly closed and released on window exit."""
-        self.webcam_thread.stop_capture()
+        """Ensure webcam hardware and background workers are properly closed and released on window exit."""
+        if hasattr(self, "_webcam_worker") and self._webcam_worker is not None and self._webcam_worker.isRunning():
+            self._webcam_worker.wait(1000)
+            if self._webcam_worker.isRunning():
+                self._webcam_worker.terminate()
+                self._webcam_worker.wait(500)
+            self._webcam_worker = None
+
+        if hasattr(self, "current_worker") and self.current_worker is not None and self.current_worker.isRunning():
+            self.current_worker.wait(1000)
+            if self.current_worker.isRunning():
+                self.current_worker.terminate()
+                self.current_worker.wait(500)
+            self.current_worker = None
+
+        if hasattr(self, "webcam_thread"):
+            self.webcam_thread.stop_capture()
+
         super().closeEvent(event)
 
 

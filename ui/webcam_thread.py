@@ -33,27 +33,36 @@ def list_available_cameras(max_indices: int = 6) -> List[int]:
     """
     valid_indices: List[int] = []
 
-    # On Linux, scan /dev/video* devices directly first
-    if platform.system() == "Linux":
-        video_devs = sorted(glob.glob("/dev/video*"))
-        for dev_path in video_devs:
-            try:
-                idx = int(dev_path.replace("/dev/video", ""))
-                # Quick probe without hanging
-                cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
+    # Suppress OpenCV C++ stderr warnings during camera probing
+    try:
+        cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+    except Exception:
+        pass
+
+    try:
+        # On Linux, scan /dev/video* devices directly first
+        if platform.system() == "Linux":
+            video_devs = sorted(glob.glob("/dev/video*"))
+            for dev_path in video_devs:
+                try:
+                    idx = int(dev_path.replace("/dev/video", ""))
+                    # Quick probe without hanging
+                    cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
+                    if cap.isOpened():
+                        valid_indices.append(idx)
+                        cap.release()
+                except Exception:
+                    continue
+
+        if not valid_indices:
+            # Generic probe fallback for all operating systems
+            for idx in range(max_indices):
+                cap = cv2.VideoCapture(idx)
                 if cap.isOpened():
                     valid_indices.append(idx)
                     cap.release()
-            except Exception:
-                continue
-
-    if not valid_indices:
-        # Generic probe fallback for all operating systems
-        for idx in range(max_indices):
-            cap = cv2.VideoCapture(idx)
-            if cap.isOpened():
-                valid_indices.append(idx)
-                cap.release()
+    except Exception:
+        pass
 
     return sorted(list(set(valid_indices)))
 
@@ -116,9 +125,12 @@ class WebcamThread(QThread):
         """Stop capture and completely release the hardware device."""
         self._running = False
         self._paused = False
-        if self.isRunning():
-            self.wait(1000)
         self._release_camera()
+        if self.isRunning():
+            self.wait(2000)
+            if self.isRunning():
+                self.terminate()
+                self.wait(1000)
         self._set_state(CameraState.STOPPED)
 
     def _release_camera(self) -> None:
