@@ -78,6 +78,8 @@ jobs:
             --hidden-import "PyQt6" `
             --hidden-import "yaml" `
             main.py
+          Copy-Item -Recurse -Force "models" "dist\trashnet\models"
+          Copy-Item -Recurse -Force "config" "dist\trashnet\config"
 
       - name: Archive Windows Build
         shell: pwsh

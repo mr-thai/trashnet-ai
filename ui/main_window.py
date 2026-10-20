@@ -69,10 +69,21 @@ class MainWindow(QMainWindow):
         # Load detector if weights exist (checks models/ directory first)
         self.detector: Optional[WasteDetector] = None
         resolved_path = None
+
+        # Resolve paths with support for PyInstaller frozen environment
+        exe_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path.cwd()
+        internal_dir = Path(getattr(sys, "_MEIPASS", exe_dir))
+
         candidate_paths = [
             Path(model_path) if model_path and Path(model_path).exists() else None,
+            exe_dir / "models" / "best.pt",
+            exe_dir / "best.pt",
+            internal_dir / "models" / "best.pt",
+            internal_dir / "best.pt",
             Path("models/best.pt"),
             Path("best.pt"),
+            exe_dir / "models" / "yolo11n-seg.pt",
+            internal_dir / "models" / "yolo11n-seg.pt",
             Path("models/yolo11n-seg.pt"),
             Path("yolo11n-seg.pt"),
         ]
