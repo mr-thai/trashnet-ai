@@ -1,0 +1,132 @@
+name: Trash-Net Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+        default: "v0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-portable-zip:
+    name: Build Portable Release Bundle (.zip)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Package Portable Zip
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [ -z "$TAG" ] || [ "$TAG" = "main" ]; then
+            TAG="${{ github.event.inputs.tag_name || 'v0.1.0' }}"
+          fi
+          ARCHIVE_NAME="trashnet-${TAG}-portable.zip"
+          zip -r "$ARCHIVE_NAME" \
+            core \
+            ui \
+            trashnet \
+            config \
+            models/best.pt \
+            models/MODEL_CARD.md \
+            models/README.md \
+            README.md \
+            requirements.txt \
+            pyproject.toml \
+            run.sh \
+            main.py \
+            -x "*.pyc" "*__pycache__*"
+
+      - name: Upload Portable Bundle Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-zip
+          path: trashnet-*.zip
+
+  build-windows-exe:
+    name: Build Windows Executable (.exe)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build Standalone Executable with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onedir --windowed `
+            --name "trashnet" `
+            --add-data "config;config" `
+            --add-data "models;models" `
+            --collect-all "ultralytics" `
+            --hidden-import "PyQt6" `
+            --hidden-import "yaml" `
+            main.py
+
+      - name: Archive Windows Build
+        shell: pwsh
+        run: |
+          $TAG = "${{ github.ref_name }}"
+          if (-not $TAG -or $TAG -eq "main") {
+            $TAG = "${{ github.event.inputs.tag_name }}"
+            if (-not $TAG) { $TAG = "v0.1.0" }
+          }
+          $ARCHIVE = "trashnet-$TAG-windows-x64.zip"
+          Compress-Archive -Path "dist\trashnet\*" -DestinationPath $ARCHIVE
+
+      - name: Upload Windows Executable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: trashnet-*-windows-x64.zip
+
+  publish-release:
+    name: Publish to GitHub Releases
+    needs: [build-portable-zip, build-windows-exe]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Determine Release Tag
+        id: vars
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [ -z "$TAG" ] || [ "$TAG" = "main" ]; then
+            TAG="${{ github.event.inputs.tag_name || 'v0.1.0' }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: "Trash-Net ${{ steps.vars.outputs.tag }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: release-artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
