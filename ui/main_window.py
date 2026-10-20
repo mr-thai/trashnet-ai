@@ -42,6 +42,7 @@ from ui.utils import FILE_DIALOG_IMAGE_FILTER, load_image_unicode
 from ui.webcam_thread import CameraState, WebcamThread, list_available_cameras
 from ui.widgets.bin_banner import BinBanner
 from ui.widgets.control_panel import ControlPanel
+from ui.widgets.guideline_card import GuidelineCard
 from ui.widgets.result_card import ResultList
 from ui.widgets.video_view import VideoView
 from ui.worker import InferenceWorker
@@ -121,7 +122,11 @@ class MainWindow(QMainWindow):
         self.bin_banner = BinBanner(self)
         right_layout.addWidget(self.bin_banner)
 
-        # 2.2 Result Cards List (Middle expanding zone)
+        # 2.2 Guideline Card (US-4.3 Preparation advice)
+        self.guideline_card = GuidelineCard(parent=self)
+        right_layout.addWidget(self.guideline_card)
+
+        # 2.3 Result Cards List (Middle expanding zone)
         self.result_list = ResultList(self)
         right_layout.addWidget(self.result_list, stretch=1)
 
@@ -429,10 +434,12 @@ class MainWindow(QMainWindow):
 
         if not self._current_detections:
             self.bin_banner.reset()
+            self.guideline_card.reset()
             self.status_bar.showMessage("Không phát hiện rác trong khung hình")
         else:
             top_detection = self._current_detections[0]
             self.bin_banner.set_bin(top_detection.bin_type)
+            self.guideline_card.set_guideline(top_detection.class_name)
             self.status_bar.showMessage(
                 f"Phát hiện {len(self._current_detections)} vật thể. "
                 f"Đích đến: {top_detection.bin_type.display_name} ({top_detection.confidence * 100:.1f}%)"
@@ -491,6 +498,7 @@ class MainWindow(QMainWindow):
         self.video_view.clear_frame()
         self.result_list.clear()
         self.bin_banner.reset()
+        self.guideline_card.reset()
         self._current_image_path = None
         self._current_frame = None
         self._current_detections.clear()
