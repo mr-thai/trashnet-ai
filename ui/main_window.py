@@ -12,6 +12,7 @@ from typing import List, Optional
 import cv2
 import numpy as np
 
+from core.audit_log import AuditLogger
 from core.detector import WasteDetector
 from core.flagging import save_flagged_frame
 from core.ood import OODDetector
@@ -40,6 +41,7 @@ from ui.qt_compat import (
 )
 from ui.utils import FILE_DIALOG_IMAGE_FILTER, load_image_unicode
 from ui.webcam_thread import CameraState, WebcamThread, list_available_cameras
+from ui.widgets.audit_dialog import AuditLogDialog
 from ui.widgets.bin_banner import BinBanner
 from ui.widgets.control_panel import ControlPanel
 from ui.widgets.guideline_card import GuidelineCard
@@ -64,18 +66,25 @@ class MainWindow(QMainWindow):
         self._current_detections: List[Detection] = []
         self._is_inferring_webcam: bool = False
 
-        # Load detector if weights exist
+        # Load detector if weights exist (checks models/ directory first)
         self.detector: Optional[WasteDetector] = None
-        if model_path and Path(model_path).exists():
+        resolved_path = None
+        for p in [Path(model_path) if model_path else None, Path("models/yolo11n-seg.pt"), Path("yolo11n-seg.pt")]:
+            if p and p.exists() and p.is_file():
+                resolved_path = p
+                break
+
+        if resolved_path is not None:
             try:
-                self.detector = WasteDetector(model_path=model_path)
+                self.detector = WasteDetector(model_path=resolved_path)
             except Exception as exc:
-                print(f"[!] Warning: Could not initialize WasteDetector with '{model_path}': {exc}")
+                print(f"[!] Warning: Could not initialize WasteDetector with '{resolved_path}': {exc}")
 
         self.current_worker: Optional[InferenceWorker] = None
         self._webcam_worker: Optional[InferenceWorker] = None
         self.webcam_thread = WebcamThread(self)
         self.ood_detector = OODDetector()
+        self.audit_logger = AuditLogger()
 
         # Performance metrics (US-3.4)
         self._capture_fps: float = 0.0
@@ -167,6 +176,7 @@ class MainWindow(QMainWindow):
         self.control_panel.reset_requested.connect(self.reset_all)
         self.control_panel.overlay_options_changed.connect(self.video_view.set_overlay_options)
         self.control_panel.flag_requested.connect(self.on_flag_requested)
+        self.control_panel.open_log_requested.connect(self.on_open_log_requested)
 
         # Webcam State Machine Signals (US-3.3 Chế độ B)
         self.control_panel.start_webcam_requested.connect(self.on_start_webcam)
@@ -440,6 +450,17 @@ class MainWindow(QMainWindow):
             top_detection = self._current_detections[0]
             self.bin_banner.set_bin(top_detection.bin_type)
             self.guideline_card.set_guideline(top_detection.class_name)
+
+            # US-4.5: Log confirmed detection with anti-duplication
+            if hasattr(self, "audit_logger") and self.audit_logger is not None:
+                src = "webcam" if (hasattr(self, "webcam_thread") and self.webcam_thread.isRunning()) else "image"
+                for det in self._current_detections:
+                    self.audit_logger.log_detection(
+                        detection=det,
+                        source=src,
+                        is_hazardous=(det.bin_type == Bin.HAZARDOUS),
+                    )
+
             self.status_bar.showMessage(
                 f"Phát hiện {len(self._current_detections)} vật thể. "
                 f"Đích đến: {top_detection.bin_type.display_name} ({top_detection.confidence * 100:.1f}%)"
@@ -484,6 +505,12 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.status_bar.showMessage(f"Lỗi lưu báo cáo: {exc}")
             QMessageBox.critical(self, "Lỗi lưu báo cáo", str(exc))
+
+    @Slot()
+    def on_open_log_requested(self) -> None:
+        """Open audit log viewer and CSV export dialog (US-4.5)."""
+        dialog = AuditLogDialog(self.audit_logger, parent=self)
+        dialog.exec()
 
     @Slot()
     def reset_all(self) -> None:

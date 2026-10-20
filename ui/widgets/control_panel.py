@@ -51,6 +51,9 @@ class ControlPanel(QFrame):
     # US-4.4 Flagging & Hazardous Signal
     flag_requested = Signal()
 
+    # US-4.5 Audit Log Dialog Signal
+    open_log_requested = Signal()
+
     def __init__(
         self,
         default_conf: float = DEFAULT_CONF,
@@ -177,9 +180,16 @@ class ControlPanel(QFrame):
             """
         )
 
+        # US-4.5 Audit Log Viewer Button
+        self._btn_log = QPushButton("📋 Nhật ký phiên...")
+        self._btn_log.setToolTip("Xem bảng nhật ký phân loại và xuất tệp báo cáo CSV")
+        self._btn_log.clicked.connect(self.open_log_requested.emit)
+        self._apply_button_style(self._btn_log, primary=False)
+
         grid_layout.addWidget(self._btn_webcam, 1, 0)
         grid_layout.addWidget(self._btn_pause, 2, 0, 1, 2)
-        grid_layout.addWidget(self._btn_flag, 3, 0, 1, 2)
+        grid_layout.addWidget(self._btn_flag, 3, 0)
+        grid_layout.addWidget(self._btn_log, 3, 1)
         main_layout.addLayout(grid_layout)
 
         # 3. Confidence Threshold Slider section

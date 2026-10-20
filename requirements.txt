@@ -1,0 +1,15 @@
+# Core Runtime Dependencies for Trash-Net (US-5.1)
+# Pinned exact versions for reproducible builds.
+# NOTE: opencv-python-headless is selected over opencv-python to eliminate
+# dynamic Qt platform/xcb plugin conflicts when running alongside PyQt6.
+
+numpy==2.5.4
+opencv-python-headless==5.0.0.93
+PyQt6==6.11.0
+PyQt6-Qt6==6.11.2
+PyQt6_sip==13.13.0
+torch==2.14.1
+torchvision==0.29.1
+ultralytics==8.4.183
+PyYAML==6.0.3
+pillow==12.3.0

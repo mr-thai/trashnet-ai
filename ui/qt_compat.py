@@ -9,6 +9,7 @@ from typing import Tuple
 try:
     from PyQt6 import QtCore, QtGui, QtWidgets
     from PyQt6.QtCore import (
+        QAbstractTableModel,
         QPoint,
         QRect,
         QSettings,
@@ -39,11 +40,13 @@ try:
         QApplication,
         QCheckBox,
         QComboBox,
+        QDialog,
         QFileDialog,
         QFrame,
         QGridLayout,
         QGroupBox,
         QHBoxLayout,
+        QHeaderView,
         QLabel,
         QMainWindow,
         QMessageBox,
@@ -54,6 +57,7 @@ try:
         QSlider,
         QSplitter,
         QStatusBar,
+        QTableView,
         QVBoxLayout,
         QWidget,
     )
@@ -64,6 +68,7 @@ except ImportError:
     try:
         from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
         from PySide6.QtCore import (  # type: ignore
+            QAbstractTableModel,
             QPoint,
             QRect,
             QSettings,
@@ -94,11 +99,13 @@ except ImportError:
             QApplication,
             QCheckBox,
             QComboBox,
+            QDialog,
             QFileDialog,
             QFrame,
             QGridLayout,
             QGroupBox,
             QHBoxLayout,
+            QHeaderView,
             QLabel,
             QMainWindow,
             QMessageBox,
@@ -109,6 +116,7 @@ except ImportError:
             QSlider,
             QSplitter,
             QStatusBar,
+            QTableView,
             QVBoxLayout,
             QWidget,
         )
@@ -144,7 +152,11 @@ __all__ = [
     "QIcon",
     "QKeySequence",
     "QApplication",
+    "QAbstractTableModel",
     "QCheckBox",
+    "QComboBox",
+    "QDialog",
+    "QHeaderView",
     "QMainWindow",
     "QWidget",
     "QFrame",
@@ -159,6 +171,7 @@ __all__ = [
     "QGroupBox",
     "QStatusBar",
     "QSizePolicy",
+    "QTableView",
     "QVBoxLayout",
     "QHBoxLayout",
     "QGridLayout",
