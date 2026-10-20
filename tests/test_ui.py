@@ -669,3 +669,147 @@ class TestConcurrencyModelUS34:
             assert not worker.isRunning()
 
 
+class TestOverlayRenderingUS35:
+    """Acceptance and unit tests for US-3.5 (Vẽ lớp phủ phân vùng)."""
+
+    def test_control_panel_overlay_toggles(self, qapp):
+        """DoD AC: Có thể bật/tắt mặt nạ, hộp bao và nhãn từ bảng điều khiển."""
+        panel = ControlPanel()
+
+        # Defaults are all True
+        assert panel.show_masks is True
+        assert panel.show_boxes is True
+        assert panel.show_labels is True
+
+        emitted_signals = []
+        panel.overlay_options_changed.connect(
+            lambda m, b, l: emitted_signals.append((m, b, l))
+        )
+
+        # Toggle masks off
+        panel._chk_masks.setChecked(False)
+        assert panel.show_masks is False
+        assert len(emitted_signals) == 1
+        assert emitted_signals[-1] == (False, True, True)
+
+        # Toggle boxes off
+        panel._chk_boxes.setChecked(False)
+        assert panel.show_boxes is False
+        assert len(emitted_signals) == 2
+        assert emitted_signals[-1] == (False, False, True)
+
+        # Toggle labels off
+        panel._chk_labels.setChecked(False)
+        assert panel.show_labels is False
+        assert len(emitted_signals) == 3
+        assert emitted_signals[-1] == (False, False, False)
+
+    def test_boundary_clipping_prevention(self, qapp):
+        """DoD AC: Nhãn hiển thị tên lớp và độ tin cậy, không bị cắt ở mép ảnh."""
+        view = VideoView()
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        # 1. Detection touching top-left boundary (0, 0)
+        det_top_left = Detection(
+            box=(0, 0, 80, 80),
+            confidence=0.92,
+            class_id=0,
+            class_name="Cardboard",
+            bin_type=Bin.RECYCLABLE,
+            polygon=[(0, 0), (80, 0), (80, 80), (0, 80)],
+        )
+
+        # 2. Detection touching bottom-right boundary (560, 400, 640, 480)
+        det_bottom_right = Detection(
+            box=(560, 400, 640, 480),
+            confidence=0.88,
+            class_id=1,
+            class_name="Food Organics",
+            bin_type=Bin.ORGANIC,
+            polygon=[(560, 400), (640, 400), (640, 480), (560, 480)],
+        )
+
+        # Overlay render should safely execute without OpenCV assertions or clipping errors
+        annotated = view._apply_overlay(frame, [det_top_left, det_bottom_right])
+        assert annotated.shape == (480, 640, 3)
+
+        # Color has been drawn on the canvas (non-zero pixels)
+        assert np.count_nonzero(annotated) > 0
+
+    def test_dod_overlapping_objects_overlay(self, qapp):
+        """DoD: Hiển thị đúng với ảnh có nhiều vật thể chồng lấn."""
+        view = VideoView()
+        frame = np.full((400, 400, 3), 40, dtype=np.uint8)
+
+        # 3 overlapping objects with different bins
+        d1 = Detection(
+            box=(50, 50, 200, 200),
+            confidence=0.95,
+            class_id=0,
+            class_name="Cardboard",
+            bin_type=Bin.RECYCLABLE,
+            polygon=[(50, 50), (200, 50), (200, 200), (50, 200)],
+        )
+        d2 = Detection(
+            box=(100, 100, 250, 250),
+            confidence=0.89,
+            class_id=1,
+            class_name="Food Organics",
+            bin_type=Bin.ORGANIC,
+            polygon=[(100, 100), (250, 100), (250, 250), (100, 250)],
+        )
+        d3 = Detection(
+            box=(150, 150, 300, 300),
+            confidence=0.82,
+            class_id=2,
+            class_name="Miscellaneous Trash",
+            bin_type=Bin.RESIDUAL,
+            polygon=[(150, 150), (300, 150), (300, 300), (150, 300)],
+        )
+
+        view.set_frame(frame, [d1, d2, d3])
+        assert view.has_frame is True
+        assert view._pixmap is not None
+        assert not view._pixmap.isNull()
+
+        # Toggle off masks, keep boxes & labels
+        view.set_overlay_options(show_masks=False, show_boxes=True, show_labels=True)
+        assert view.show_masks is False
+        assert view.show_boxes is True
+
+        # Toggle off all overlays
+        view.set_overlay_options(show_masks=False, show_boxes=False, show_labels=False)
+        annotated_none = view._apply_overlay(frame, [d1, d2, d3])
+        # When all overlays are off, frame should be identical to raw input
+        np.testing.assert_array_equal(annotated_none, frame)
+
+    def test_rendering_performance_under_10_percent_drop(self, qapp):
+        """DoD AC: Việc vẽ không làm giảm FPS giao diện quá 10% (độ trễ vẽ < 5ms)."""
+        import time
+
+        view = VideoView()
+        frame = np.full((480, 640, 3), 50, dtype=np.uint8)
+
+        det = Detection(
+            box=(100, 100, 400, 400),
+            confidence=0.90,
+            class_id=0,
+            class_name="Cardboard",
+            bin_type=Bin.RECYCLABLE,
+            polygon=[(100, 100), (400, 100), (400, 400), (100, 400)],
+        )
+
+        # Warm up
+        view._apply_overlay(frame, [det])
+
+        # Benchmark 50 overlay frames
+        t0 = time.perf_counter()
+        for _ in range(50):
+            view._apply_overlay(frame, [det])
+        avg_render_ms = ((time.perf_counter() - t0) / 50.0) * 1000.0
+
+        # Rendering overlay should be blazing fast (< 5ms on CPU)
+        assert avg_render_ms < 5.0
+
+
+

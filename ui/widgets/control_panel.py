@@ -6,6 +6,7 @@ Provides user controls for opening media files, webcam streaming state machine
 
 from typing import List, Optional
 from ui.qt_compat import (
+    QCheckBox,
     QComboBox,
     QFrame,
     QGridLayout,
@@ -36,6 +37,9 @@ class ControlPanel(QFrame):
     pause_webcam_requested = Signal()
     resume_webcam_requested = Signal()
     stop_webcam_requested = Signal()
+
+    # US-3.5 Overlay Toggle Signals
+    overlay_options_changed = Signal(bool, bool, bool)  # (show_masks, show_boxes, show_labels)
 
     def __init__(self, default_conf: float = 0.25, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -173,6 +177,59 @@ class ControlPanel(QFrame):
         slider_container.addWidget(self._slider)
         main_layout.addLayout(slider_container)
 
+        # 4. Overlay Layer Toggles (US-3.5)
+        overlay_container = QVBoxLayout()
+        overlay_container.setSpacing(6)
+        overlay_title = QLabel("Lớp phủ hiển thị (Overlays):")
+        overlay_title.setStyleSheet("font-size: 12px; color: #9CA3AF;")
+        overlay_container.addWidget(overlay_title)
+
+        chk_layout = QHBoxLayout()
+        chk_layout.setSpacing(10)
+
+        self._chk_masks = QCheckBox("Mặt nạ")
+        self._chk_masks.setChecked(True)
+        self._chk_masks.setToolTip("Bật/Tắt mặt nạ đa giác phân vùng")
+        self._chk_masks.toggled.connect(self._on_overlay_toggled)
+
+        self._chk_boxes = QCheckBox("Hộp bao")
+        self._chk_boxes.setChecked(True)
+        self._chk_boxes.setToolTip("Bật/Tắt khung chữ nhật bao quanh vật thể")
+        self._chk_boxes.toggled.connect(self._on_overlay_toggled)
+
+        self._chk_labels = QCheckBox("Nhãn")
+        self._chk_labels.setChecked(True)
+        self._chk_labels.setToolTip("Bật/Tắt tên loại rác và độ tin cậy")
+        self._chk_labels.toggled.connect(self._on_overlay_toggled)
+
+        chk_style = """
+            QCheckBox {
+                color: #D1D5DB;
+                font-size: 12px;
+                spacing: 5px;
+            }
+            QCheckBox::indicator {
+                width: 14px;
+                height: 14px;
+                border: 1px solid #4B5563;
+                border-radius: 3px;
+                background-color: #1F2937;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #3B82F6;
+                border-color: #3B82F6;
+            }
+        """
+        self._chk_masks.setStyleSheet(chk_style)
+        self._chk_boxes.setStyleSheet(chk_style)
+        self._chk_labels.setStyleSheet(chk_style)
+
+        chk_layout.addWidget(self._chk_masks)
+        chk_layout.addWidget(self._chk_boxes)
+        chk_layout.addWidget(self._chk_labels)
+        overlay_container.addLayout(chk_layout)
+        main_layout.addLayout(overlay_container)
+
     def populate_cameras(self, camera_indices: List[int]) -> None:
         """Update available camera items in dropdown."""
         self.camera_combo.clear()
@@ -222,7 +279,29 @@ class ControlPanel(QFrame):
             self._btn_pause.setEnabled(True)
 
     @property
-    def confidence_threshold(self) -> float:
+    def show_masks(self) -> bool:
+        """Check if mask overlay is toggled on."""
+        return self._chk_masks.isChecked()
+
+    @property
+    def show_boxes(self) -> bool:
+        """Check if bounding box overlay is toggled on."""
+        return self._chk_boxes.isChecked()
+
+    @property
+    def show_labels(self) -> bool:
+        """Check if label overlay is toggled on."""
+        return self._chk_labels.isChecked()
+
+    def set_overlay_toggles(self, masks: bool = True, boxes: bool = True, labels: bool = True) -> None:
+        """Programmatically set overlay toggle states."""
+        self._chk_masks.setChecked(masks)
+        self._chk_boxes.setChecked(boxes)
+        self._chk_labels.setChecked(labels)
+
+    def _on_overlay_toggled(self) -> None:
+        """Emit updated overlay configuration when checkboxes are clicked."""
+        self.overlay_options_changed.emit(self.show_masks, self.show_boxes, self.show_labels)
         """Get the current confidence threshold fraction [0.05, 0.95]."""
         return self._slider.value() / 100.0
 

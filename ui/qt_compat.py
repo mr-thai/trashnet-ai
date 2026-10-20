@@ -36,6 +36,7 @@ try:
     )
     from PyQt6.QtWidgets import (
         QApplication,
+        QCheckBox,
         QComboBox,
         QFileDialog,
         QFrame,
@@ -89,6 +90,7 @@ except ImportError:
         )
         from PySide6.QtWidgets import (  # type: ignore
             QApplication,
+            QCheckBox,
             QComboBox,
             QFileDialog,
             QFrame,
@@ -140,6 +142,7 @@ __all__ = [
     "QIcon",
     "QKeySequence",
     "QApplication",
+    "QCheckBox",
     "QMainWindow",
     "QWidget",
     "QFrame",

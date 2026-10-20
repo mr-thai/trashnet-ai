@@ -60,6 +60,11 @@ class VideoView(QWidget):
         self._original_width: int = 0
         self._original_height: int = 0
 
+        # Overlay display toggles (US-3.5)
+        self._show_masks: bool = True
+        self._show_boxes: bool = True
+        self._show_labels: bool = True
+
         # Enable Drag & Drop (US-3.3)
         self.setAcceptDrops(True)
 
@@ -77,6 +82,34 @@ class VideoView(QWidget):
     def frame_resolution(self) -> tuple[int, int]:
         """Return native (width, height) of loaded frame."""
         return (self._original_width, self._original_height)
+
+    @property
+    def show_masks(self) -> bool:
+        """Check if segmentation masks are visible."""
+        return self._show_masks
+
+    @property
+    def show_boxes(self) -> bool:
+        """Check if bounding boxes are visible."""
+        return self._show_boxes
+
+    @property
+    def show_labels(self) -> bool:
+        """Check if text labels are visible."""
+        return self._show_labels
+
+    def set_overlay_options(
+        self,
+        show_masks: bool = True,
+        show_boxes: bool = True,
+        show_labels: bool = True,
+    ) -> None:
+        """Toggle visibility of segmentation masks, bounding boxes, and labels (US-3.5)."""
+        self._show_masks = show_masks
+        self._show_boxes = show_boxes
+        self._show_labels = show_labels
+        if self._raw_frame is not None:
+            self.set_frame(self._raw_frame, self._detections)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         """Accept drag events containing URLs/files."""
@@ -152,11 +185,10 @@ class VideoView(QWidget):
                 q_img = QImage(
                     render_img.data, w, h, bytes_per_line, QImage.Format.Format_Grayscale8
                 ).copy()
-            elif render_img.shape[2] == 3:  # BGR to RGB
-                rgb = cv2.cvtColor(render_img, cv2.COLOR_BGR2RGB)
+            elif render_img.shape[2] == 3:  # Native BGR888 support (zero conversion overhead)
                 bytes_per_line = 3 * w
                 q_img = QImage(
-                    rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888
+                    render_img.data, w, h, bytes_per_line, QImage.Format.Format_BGR888
                 ).copy()
             elif render_img.shape[2] == 4:  # BGRA to RGBA
                 rgba = cv2.cvtColor(render_img, cv2.COLOR_BGRA2RGBA)
@@ -188,54 +220,79 @@ class VideoView(QWidget):
             self.set_frame(self._raw_frame, self._detections)
 
     def _apply_overlay(self, frame: np.ndarray, detections: List[Detection]) -> np.ndarray:
-        """Render segmentation polygon masks and bounding boxes."""
-        if not detections:
+        """Render segmentation polygon masks, bounding boxes, and non-clipped labels (US-3.5)."""
+        if not detections or (not self._show_masks and not self._show_boxes and not self._show_labels):
             return frame
 
         annotated = frame.copy()
-        overlay = annotated.copy()
+        h, w = frame.shape[:2]
 
-        # 1. Semi-transparent polygon mask
-        for det in detections:
-            color = BIN_COLORS_BGR.get(det.bin_type, (140, 140, 140))
-            if det.polygon and len(det.polygon) >= 3:
-                pts = np.array(det.polygon, dtype=np.int32)
-                cv2.fillPoly(overlay, [pts], color=color)
+        # 1. Semi-transparent polygon mask (only when show_masks is enabled)
+        if self._show_masks:
+            has_masks = False
+            overlay = frame.copy()
+            for det in detections:
+                if det.polygon and len(det.polygon) >= 3:
+                    color = BIN_COLORS_BGR.get(det.bin_type, (140, 140, 140))
+                    pts = np.array(det.polygon, dtype=np.int32)
+                    cv2.fillPoly(overlay, [pts], color=color)
+                    has_masks = True
 
-        cv2.addWeighted(overlay, 0.4, annotated, 0.6, 0, annotated)
+            if has_masks:
+                cv2.addWeighted(overlay, 0.45, annotated, 0.55, 0, annotated)
 
         # 2. Polygon contours, bounding boxes, labels
         for det in detections:
             color = BIN_COLORS_BGR.get(det.bin_type, (140, 140, 140))
             x1, y1, x2, y2 = det.box
 
-            # Polygon contours
-            if det.polygon and len(det.polygon) >= 3:
+            # Polygon contours (solid boundary with bin color)
+            if self._show_masks and det.polygon and len(det.polygon) >= 3:
                 pts = np.array(det.polygon, dtype=np.int32)
                 cv2.polylines(annotated, [pts], isClosed=True, color=color, thickness=2, lineType=cv2.LINE_AA)
 
             # Bounding box
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color=color, thickness=2, lineType=cv2.LINE_AA)
+            if self._show_boxes:
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color=color, thickness=2, lineType=cv2.LINE_AA)
 
-            # Label badge
-            label_text = f"[{det.bin_type.display_name}] {det.class_name} ({det.confidence * 100:.0f}%)"
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            (tw, th), bl = cv2.getTextSize(label_text, font, 0.55, 1)
-            ty1 = max(0, y1 - th - 8)
-            ty2 = ty1 + th + 8
-            tx2 = min(annotated.shape[1], x1 + tw + 10)
+            # Label badge (never clipped at boundaries)
+            if self._show_labels:
+                label_text = f"[{det.bin_type.display_name}] {det.class_name} ({det.confidence * 100:.0f}%)"
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.5
+                thickness = 1
+                (tw, th), baseline = cv2.getTextSize(label_text, font, font_scale, thickness)
 
-            cv2.rectangle(annotated, (x1, ty1), (tx2, ty2), color=color, thickness=-1)
-            cv2.putText(
-                annotated,
-                label_text,
-                (x1 + 5, ty2 - 5),
-                font,
-                0.55,
-                (255, 255, 255),
-                1,
-                cv2.LINE_AA,
-            )
+                pad_x = 5
+                pad_y = 4
+                badge_w = tw + 2 * pad_x
+                badge_h = th + 2 * pad_y + baseline
+
+                # Horizontal clamping: shift left if touching right boundary
+                bx1 = max(0, min(x1, w - badge_w))
+                bx2 = min(w, bx1 + badge_w)
+
+                # Vertical clamping: draw above box if space, otherwise inside/below box
+                if y1 - badge_h >= 0:
+                    by1 = y1 - badge_h
+                    by2 = y1
+                else:
+                    by1 = min(y1, max(0, h - badge_h))
+                    by2 = min(h, by1 + badge_h)
+
+                cv2.rectangle(annotated, (bx1, by1), (bx2, by2), color=color, thickness=-1)
+                text_x = bx1 + pad_x
+                text_y = by1 + pad_y + th
+                cv2.putText(
+                    annotated,
+                    label_text,
+                    (text_x, text_y),
+                    font,
+                    font_scale,
+                    (255, 255, 255),
+                    thickness,
+                    cv2.LINE_AA,
+                )
 
         return annotated
 

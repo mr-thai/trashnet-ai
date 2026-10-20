@@ -156,6 +156,7 @@ class MainWindow(QMainWindow):
         self.control_panel.toggle_webcam_requested.connect(self.on_toggle_webcam)
         self.control_panel.confidence_changed.connect(self.on_confidence_changed)
         self.control_panel.reset_requested.connect(self.reset_all)
+        self.control_panel.overlay_options_changed.connect(self.video_view.set_overlay_options)
 
         # Webcam State Machine Signals (US-3.3 Chế độ B)
         self.control_panel.start_webcam_requested.connect(self.on_start_webcam)
