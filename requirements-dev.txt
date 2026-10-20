@@ -6,3 +6,5 @@
 pytest==9.1.1
 anyio==4.15.1
 pip-tools==7.4.1
+ruff>=0.8.0
+mypy>=1.13.0

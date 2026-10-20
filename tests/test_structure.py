@@ -68,3 +68,28 @@ class TestModularProjectStructure:
         assert "dependencies" in data["project"]
         assert "scripts" in data["project"]
         assert data["project"]["scripts"]["trashnet"] == "ui.main_window:run_app"
+
+    def test_ci_workflow_configuration(self):
+        """DoD AC (US-5.4): CI configuration exists, runs ruff, mypy, and offscreen pytest."""
+        import yaml
+
+        ci_yaml = Path(".github/workflows/ci.yml")
+        assert ci_yaml.exists(), "Missing .github/workflows/ci.yml"
+
+        content = ci_yaml.read_text(encoding="utf-8")
+        data = yaml.safe_load(content)
+        assert "jobs" in data
+
+        # Check for ruff, mypy, and offscreen pytest
+        workflow_str = str(data)
+        assert "ruff" in workflow_str
+        assert "mypy" in workflow_str
+        assert "pytest" in workflow_str
+        assert "QT_QPA_PLATFORM" in workflow_str
+        assert "offscreen" in workflow_str
+
+    def test_tests_data_sample_image_exists(self):
+        """DoD AC (US-5.4): tests/data/ contains sample image for inference testing."""
+        sample_img = Path("tests/data/sample_waste.jpg")
+        assert sample_img.exists()
+        assert sample_img.stat().st_size > 0

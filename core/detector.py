@@ -13,7 +13,7 @@ import torch
 from ultralytics import YOLO
 
 from core.mapper import BinMapper
-from core.types import Bin, Detection
+from core.types import Detection
 
 
 class ModelLoadError(Exception):
@@ -129,6 +129,8 @@ class WasteDetector:
 
     def _warmup(self) -> None:
         """Execute one forward pass with a dummy blank image to prime GPU/CPU kernels."""
+        if self._model is None:
+            return
         try:
             dummy_frame = np.zeros((self.imgsz, self.imgsz, 3), dtype=np.uint8)
             self._model.predict(
@@ -185,8 +187,11 @@ class WasteDetector:
         # cv2.cvtColor returns a newly allocated array, leaving `frame` untouched.
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
+        if self._model is None:
+            raise ModelLoadError("Model is not initialized.")
+
         # Execute prediction
-        raw_results = self._model.predict(
+        raw_results: Any = self._model.predict(
             source=rgb_frame,
             conf=threshold,
             imgsz=self.imgsz,

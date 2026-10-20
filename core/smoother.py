@@ -11,7 +11,7 @@ from enum import Enum
 import time
 from typing import Dict, List, Optional, Tuple
 
-from core.mapper import BinMapper, map_class_to_bin
+from core.mapper import BinMapper
 from core.types import Bin, Detection
 
 
@@ -170,6 +170,9 @@ class TrackedTarget:
             cname = self.candidate_class_name
             btype = self.candidate_bin_type
         else:
+            return None
+
+        if cid is None or btype is None:
             return None
 
         # Compute average confidence for the active class in the window

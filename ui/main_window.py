@@ -69,7 +69,14 @@ class MainWindow(QMainWindow):
         # Load detector if weights exist (checks models/ directory first)
         self.detector: Optional[WasteDetector] = None
         resolved_path = None
-        for p in [Path(model_path) if model_path else None, Path("models/yolo11n-seg.pt"), Path("yolo11n-seg.pt")]:
+        candidate_paths = [
+            Path(model_path) if model_path and Path(model_path).exists() else None,
+            Path("models/best.pt"),
+            Path("best.pt"),
+            Path("models/yolo11n-seg.pt"),
+            Path("yolo11n-seg.pt"),
+        ]
+        for p in candidate_paths:
             if p and p.exists() and p.is_file():
                 resolved_path = p
                 break
