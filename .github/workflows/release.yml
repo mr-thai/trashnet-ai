@@ -75,8 +75,11 @@ jobs:
             --add-data "config;config" `
             --add-data "models;models" `
             --collect-all "ultralytics" `
+            --collect-all "torchvision" `
             --hidden-import "PyQt6" `
             --hidden-import "yaml" `
+            --hidden-import "torchvision" `
+            --hidden-import "torchvision.ops" `
             main.py
           Copy-Item -Recurse -Force "models" "dist\trashnet\models"
           Copy-Item -Recurse -Force "config" "dist\trashnet\config"
