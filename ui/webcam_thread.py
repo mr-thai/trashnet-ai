@@ -6,9 +6,7 @@ Idle -> Running -> Paused -> Stopped, device disconnection handling, and memory-
 
 from enum import Enum
 import glob
-from pathlib import Path
 import platform
-import sys
 import time
 from typing import List, Optional
 import cv2
@@ -163,7 +161,8 @@ class CaptureThread(QThread):
             )
             return
 
-        # Configure camera optimal frame size and FPS
+        # Configure camera optimal frame size, FPS, and zero-latency single frame buffer
+        self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self._cap.set(cv2.CAP_PROP_FPS, self._target_fps)

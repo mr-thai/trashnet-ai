@@ -10,7 +10,6 @@ from pathlib import Path
 import sys
 import time
 from typing import List, Optional
-import cv2
 import numpy as np
 
 from core.audit_log import AuditLogger
@@ -33,7 +32,6 @@ from ui.qt_compat import (
     QHBoxLayout,
     QMainWindow,
     QMessageBox,
-    QSize,
     QSplitter,
     QStatusBar,
     Qt,

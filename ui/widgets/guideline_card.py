@@ -5,13 +5,12 @@ detected top waste category in the right control panel.
 """
 
 from typing import Optional
-from core.guidelines import GuidelineManager, get_waste_guideline
+from core.guidelines import GuidelineManager
 from ui.qt_compat import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
-    Qt,
     QVBoxLayout,
     QWidget,
 )

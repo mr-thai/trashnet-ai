@@ -17,7 +17,6 @@ from ui.qt_compat import (
     QSlider,
     Qt,
     Signal,
-    Slot,
     QVBoxLayout,
     QWidget,
 )

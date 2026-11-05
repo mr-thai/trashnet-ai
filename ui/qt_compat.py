@@ -4,7 +4,7 @@ Allows components to seamlessly run under either PyQt6 or PySide6 without
 direct vendor lock-in.
 """
 
-from typing import Tuple
+# ruff: noqa: F401
 
 try:
     from PyQt6 import QtCore, QtGui, QtWidgets

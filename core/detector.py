@@ -7,7 +7,6 @@ and returns structured Detection objects with bin mappings sorted by confidence.
 
 from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
-import cv2
 import numpy as np
 import torch
 from ultralytics import YOLO

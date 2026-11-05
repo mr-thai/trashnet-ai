@@ -5,7 +5,6 @@ Implements a size-1 buffer (latest-frame-wins) to drop intermediate frames when
 inference is slower than the camera capture rate.
 """
 
-from pathlib import Path
 import threading
 import time
 from typing import List, Optional

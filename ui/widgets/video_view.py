@@ -5,7 +5,7 @@ and instance segmentation polygon mask overlays.
 """
 
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 import cv2
 import numpy as np
 
@@ -13,7 +13,6 @@ from core.mapper import BinMapper
 from core.types import Bin, Detection
 from ui.constants import get_vietnamese_label
 from ui.qt_compat import (
-    QBrush,
     QColor,
     QDragEnterEvent,
     QDragMoveEvent,
