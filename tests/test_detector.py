@@ -10,6 +10,7 @@ import tempfile
 import cv2
 import numpy as np
 import pytest
+import torch
 from core.detector import WasteDetector, ModelLoadError, InvalidFrameError
 from core.types import Bin, Detection
 
@@ -115,8 +116,20 @@ class TestWasteDetector:
             detector.detect("not_an_image")
 
         gray_2d = np.zeros((100, 100), dtype=np.uint8)
-        with pytest.raises(InvalidFrameError, match="must have 3 dimensions"):
+        with pytest.raises(InvalidFrameError, match="must have 3 non-empty dimensions"):
             detector.detect(gray_2d)
+
+        empty_frame = np.zeros((0, 0, 3), dtype=np.uint8)
+        with pytest.raises(InvalidFrameError, match="must have 3 non-empty dimensions"):
+            detector.detect(empty_frame)
+
+        zero_h_frame = np.zeros((0, 100, 3), dtype=np.uint8)
+        with pytest.raises(InvalidFrameError, match="must have 3 non-empty dimensions"):
+            detector.detect(zero_h_frame)
+
+        zero_w_frame = np.zeros((100, 0, 3), dtype=np.uint8)
+        with pytest.raises(InvalidFrameError, match="must have 3 non-empty dimensions"):
+            detector.detect(zero_w_frame)
 
     def test_detect_returns_structured_detections(
         self,
@@ -189,3 +202,39 @@ class TestWasteDetector:
                 for mod in forbidden_modules:
                     assert f"import {mod}" not in content, f"Found forbidden import '{mod}' in {py_file}"
                     assert f"from {mod}" not in content, f"Found forbidden from-import '{mod}' in {py_file}"
+
+    def test_iou_parameter_and_validation(self, pretrained_weights_path: Path):
+        """Verify NMS IoU threshold configuration and bounds checking."""
+        detector = WasteDetector(
+            model_path=pretrained_weights_path,
+            iou=0.5,
+            warmup=False,
+        )
+        assert detector.iou == 0.5
+        assert detector.iou_threshold == 0.5
+
+        with pytest.raises(ValueError, match="IoU threshold"):
+            WasteDetector(model_path=pretrained_weights_path, iou=0.0, warmup=False)
+
+        with pytest.raises(ValueError, match="IoU threshold"):
+            WasteDetector(model_path=pretrained_weights_path, iou=1.5, warmup=False)
+
+    def test_half_precision_and_device_fallback(self, pretrained_weights_path: Path):
+        """Verify FP16 configuration and device fallback when hardware is unavailable."""
+        detector = WasteDetector(
+            model_path=pretrained_weights_path,
+            half=False,
+            warmup=False,
+        )
+        assert detector.half is False
+        assert detector.half_precision is False
+
+        # If cuda is explicitly requested on CPU-only system, falls back to CPU
+        if not torch.cuda.is_available():
+            fallback_det = WasteDetector(
+                model_path=pretrained_weights_path,
+                device="cuda",
+                warmup=False,
+            )
+            assert fallback_det.device == "cpu"
+            assert fallback_det.half is False

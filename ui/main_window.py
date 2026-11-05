@@ -53,7 +53,7 @@ from ui.worker import InferenceWorker
 class MainWindow(QMainWindow):
     """Primary GUI window for Trash-Net waste classification."""
 
-    def __init__(self, model_path: Optional[str] = "yolo11n-seg.pt", parent: Optional[QWidget] = None) -> None:
+    def __init__(self, model_path: Optional[str] = None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(DEFAULT_WINDOW_TITLE)
 
@@ -101,7 +101,8 @@ class MainWindow(QMainWindow):
         self.current_worker: Optional[InferenceWorker] = None
         self._webcam_worker: Optional[InferenceWorker] = None
         self.webcam_thread = WebcamThread(self)
-        self.ood_detector = OODDetector()
+        det_conf = self.detector.conf if hasattr(self, "detector") and self.detector is not None else 0.25
+        self.ood_detector = OODDetector(conf_threshold=det_conf)
         self.audit_logger = AuditLogger()
 
         # Performance metrics (US-3.4)
@@ -449,6 +450,8 @@ class MainWindow(QMainWindow):
     def on_confidence_changed(self, threshold: float) -> None:
         """Handle confidence threshold slider changes (US-4.1)."""
         self.status_bar.showMessage(f"Ngưỡng tin cậy cập nhật: {threshold:.2f} ({threshold * 100:.0f}%)")
+        if hasattr(self, "ood_detector") and self.ood_detector is not None:
+            self.ood_detector.conf_threshold = threshold
         if self._webcam_worker is not None and self._webcam_worker.is_worker_running:
             self._webcam_worker.set_confidence(threshold)
         elif self._current_frame is not None and self.detector is not None and not self.webcam_thread.isRunning():

@@ -86,7 +86,8 @@ class InferenceWorker(QThread):
             self._smoother.reset()
 
     def stop(self, timeout_ms: int = 2000) -> None:
-        """Safely signal the worker to exit and wait up to timeout_ms."""
+        """Safely signal the worker to exit and wait up to timeout_ms without abrupt termination."""
+        self.requestInterruption()
         with self._condition:
             self._running = False
             self._pending_frame = None
@@ -96,22 +97,22 @@ class InferenceWorker(QThread):
             self._smoother.reset()
 
         if self.isRunning():
-            self.wait(timeout_ms)
-            if self.isRunning():
-                self.terminate()
+            if not self.wait(timeout_ms):
+                with self._condition:
+                    self._condition.notify_all()
                 self.wait(500)
 
     def run(self) -> None:
         """Execute inference loop off the GUI thread."""
         self._running = True
 
-        while self._running:
+        while self._running and not self.isInterruptionRequested():
             with self._condition:
-                while self._running and self._pending_frame is None:
+                while self._running and not self.isInterruptionRequested() and self._pending_frame is None:
                     # Wait for next frame without busy-waiting
                     self._condition.wait(timeout=0.1)
 
-                if not self._running:
+                if not self._running or self.isInterruptionRequested():
                     break
 
                 # Atomically extract latest frame and clear slot

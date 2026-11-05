@@ -9,7 +9,7 @@ from dataclasses import replace
 from typing import List, Optional
 from core.types import Bin, Detection
 
-DEFAULT_OOD_CONF_THRESHOLD: float = 0.50  # Acceptance criteria: default in range 0.35–0.60
+DEFAULT_OOD_CONF_THRESHOLD: float = 0.25  # Aligned with default WasteDetector confidence (0.25)
 DEFAULT_OOD_MARGIN_THRESHOLD: float = 0.15
 
 
