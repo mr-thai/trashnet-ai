@@ -173,7 +173,6 @@ class WasteDetector:
                 imgsz=self.imgsz,
                 conf=self.conf,
                 iou=self.iou,
-                half=self.half,
                 verbose=False,
             )
         except Exception:
@@ -191,7 +190,6 @@ class WasteDetector:
                         imgsz=self.imgsz,
                         conf=self.conf,
                         iou=self.iou,
-                        half=False,
                         verbose=False,
                     )
                 except Exception:
@@ -254,7 +252,6 @@ class WasteDetector:
                 iou=target_iou,
                 imgsz=self.imgsz,
                 device=self._device,
-                half=self.half,
                 verbose=False,
             )
         except (torch.cuda.OutOfMemoryError, RuntimeError) as exc:
@@ -269,7 +266,6 @@ class WasteDetector:
                     iou=target_iou,
                     imgsz=self.imgsz,
                     device="cpu",
-                    half=False,
                     verbose=False,
                 )
             else:

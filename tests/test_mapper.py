@@ -7,7 +7,7 @@ and external YAML configuration loading with fallback.
 from pathlib import Path
 import tempfile
 import pytest
-from core.mapper import BinMapper, map_class_to_bin
+from core.mapper import BinMapper, hex_to_bgr, map_class_to_bin
 from core.types import Bin
 
 
@@ -84,3 +84,20 @@ bins:
         assert Bin.ORGANIC.display_name == "Hữu cơ"
         assert Bin.RESIDUAL.display_name == "Vô cơ / Khác"
         assert Bin.UNKNOWN.display_name == "Không xác định"
+
+    def test_bin_color_mapping_and_hex_conversion(self):
+        """Verify dynamic color extraction from YAML and hex-to-BGR conversion."""
+        mapper = BinMapper()
+        assert mapper.get_bin_color_hex(Bin.ORGANIC) == "#2E7D32"
+        assert mapper.get_bin_color_hex(Bin.RECYCLABLE) == "#1565C0"
+        assert mapper.get_bin_color_hex(Bin.RESIDUAL) == "#C62828"
+
+        # BGR tuples
+        organic_bgr = mapper.get_bin_color_bgr(Bin.ORGANIC)
+        assert len(organic_bgr) == 3
+        assert organic_bgr == hex_to_bgr("#2E7D32")
+
+        # Fallback and special bins
+        assert mapper.get_bin_color_bgr(Bin.HAZARDOUS) == (38, 38, 220)
+        assert mapper.get_bin_color_bgr(Bin.UNKNOWN) == (140, 140, 140)
+        assert hex_to_bgr("invalid_hex") == (140, 140, 140)

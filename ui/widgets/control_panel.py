@@ -28,6 +28,12 @@ CONF_STEP: float = 0.05
 DEFAULT_CONF: float = 0.60
 SETTINGS_KEY_CONF: str = "confidence_threshold"
 
+IOU_MIN: float = 0.10
+IOU_MAX: float = 0.95
+IOU_STEP: float = 0.05
+DEFAULT_IOU: float = 0.45
+SETTINGS_KEY_IOU: str = "iou_threshold"
+
 
 class ControlPanel(QFrame):
     """Panel hosting primary action buttons, camera controls, and configuration sliders."""
@@ -37,6 +43,8 @@ class ControlPanel(QFrame):
     open_video_requested = Signal()
     toggle_webcam_requested = Signal(bool)
     confidence_changed = Signal(float)
+    iou_changed = Signal(float)
+    max_detections_changed = Signal(int)
     reset_requested = Signal()
 
     # US-3.3 Chế độ B Signals
@@ -246,6 +254,60 @@ class ControlPanel(QFrame):
         slider_container.addWidget(self._slider)
         main_layout.addLayout(slider_container)
 
+        # 3.2 IoU Threshold Slider (NMS overlap control)
+        iou_container = QVBoxLayout()
+        iou_container.setSpacing(4)
+
+        iou_header = QHBoxLayout()
+        iou_title = QLabel("Ngưỡng IoU (Khử đè lấn):")
+        iou_title.setStyleSheet("font-size: 12px; color: #9CA3AF;")
+        self._iou_val_label = QLabel(f"{DEFAULT_IOU:.2f}")
+        self._iou_val_label.setStyleSheet("font-weight: bold; color: #3B82F6; font-size: 13px;")
+
+        iou_header.addWidget(iou_title)
+        iou_header.addStretch()
+        iou_header.addWidget(self._iou_val_label)
+        iou_container.addLayout(iou_header)
+
+        self._iou_slider = QSlider(Qt.Orientation.Horizontal)
+        self._iou_slider.setMinimum(int(IOU_MIN / IOU_STEP))
+        self._iou_slider.setMaximum(int(IOU_MAX / IOU_STEP))
+        self._iou_slider.setValue(int(round(DEFAULT_IOU / IOU_STEP)))
+        self._iou_slider.setSingleStep(1)
+        self._iou_slider.valueChanged.connect(self._on_iou_slider_changed)
+        self._iou_slider.setStyleSheet(self._slider.styleSheet())
+        iou_container.addWidget(self._iou_slider)
+        main_layout.addLayout(iou_container)
+
+        # 3.3 Top-K / Max Detections Selector
+        topk_container = QHBoxLayout()
+        topk_title = QLabel("Giới hạn số lượng hiển thị:")
+        topk_title.setStyleSheet("font-size: 12px; color: #9CA3AF;")
+        self._topk_combo = QComboBox()
+        self._topk_combo.addItem("Tất cả", 9999)
+        self._topk_combo.addItem("Top 5", 5)
+        self._topk_combo.addItem("Top 10", 10)
+        self._topk_combo.addItem("Top 15", 15)
+        self._topk_combo.addItem("Top 20", 20)
+        self._topk_combo.addItem("Top 30", 30)
+        self._topk_combo.currentIndexChanged.connect(self._on_topk_changed)
+        self._topk_combo.setStyleSheet(
+            """
+            QComboBox {
+                background-color: #1F2937;
+                color: #F9FAFB;
+                border: 1px solid #374151;
+                border-radius: 4px;
+                padding: 3px 8px;
+                font-size: 12px;
+            }
+            """
+        )
+        topk_container.addWidget(topk_title)
+        topk_container.addStretch()
+        topk_container.addWidget(self._topk_combo)
+        main_layout.addLayout(topk_container)
+
         # 4. Overlay Layer Toggles (US-3.5)
         overlay_container = QVBoxLayout()
         overlay_container.setSpacing(6)
@@ -382,6 +444,41 @@ class ControlPanel(QFrame):
         clamped = max(CONF_MIN, min(CONF_MAX, conf))
         slider_val = int(round(clamped / CONF_STEP))
         self._slider.setValue(slider_val)
+
+    @property
+    def iou_threshold(self) -> float:
+        """Get the current NMS IoU threshold fraction [0.10, 0.95]."""
+        return round(self._iou_slider.value() * IOU_STEP, 2)
+
+    def set_iou_threshold(self, iou: float) -> None:
+        """Programmatically set IoU threshold and update slider position."""
+        clamped = max(IOU_MIN, min(IOU_MAX, iou))
+        slider_val = int(round(clamped / IOU_STEP))
+        self._iou_slider.setValue(slider_val)
+
+    @property
+    def max_detections(self) -> int:
+        """Get current maximum detection limit (Top-K)."""
+        data = self._topk_combo.currentData()
+        return int(data) if data is not None else 9999
+
+    def set_max_detections(self, limit: int) -> None:
+        """Programmatically set Top-K detection limit in dropdown."""
+        idx = self._topk_combo.findData(limit)
+        if idx >= 0:
+            self._topk_combo.setCurrentIndex(idx)
+
+    def _on_iou_slider_changed(self, value: int) -> None:
+        """Handle IoU slider position change."""
+        current_iou = round(value * IOU_STEP, 2)
+        self._iou_val_label.setText(f"{current_iou:.2f}")
+        self.iou_changed.emit(current_iou)
+
+    def _on_topk_changed(self, index: int) -> None:
+        """Handle Top-K limit change."""
+        data = self._topk_combo.currentData()
+        limit = int(data) if data is not None else 9999
+        self.max_detections_changed.emit(limit)
 
     @property
     def is_webcam_active(self) -> bool:

@@ -4,6 +4,7 @@ Independent of GUI (PyQt/PySide) and desktop presentation frameworks.
 """
 
 from core.audit_log import AuditEntry, AuditLogger
+from core.config import AppConfig, ModelConfig, SmootherConfig, CameraConfig, UIConfig
 from core.detector import WasteDetector, ModelLoadError, InvalidFrameError
 from core.flagging import save_flagged_frame
 from core.guidelines import GuidelineManager, get_waste_guideline
@@ -15,6 +16,7 @@ from core.types import Bin, Detection
 __all__ = [
     "AuditEntry",
     "AuditLogger",
+    "AppConfig",
     "WasteDetector",
     "ModelLoadError",
     "InvalidFrameError",

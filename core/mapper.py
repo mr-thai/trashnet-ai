@@ -4,11 +4,25 @@ Maps 8 MultiTrash classes to 3 sorting bins based on external YAML configuration
 """
 
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Tuple, Union
 import yaml
 from core.types import Bin
 
 DEFAULT_MAPPING_PATH = Path("config/bin_mapping.yaml")
+
+
+def hex_to_bgr(hex_str: str) -> Tuple[int, int, int]:
+    """Convert hex color string (e.g. '#2E7D32') to BGR integer tuple for OpenCV."""
+    cleaned = hex_str.strip().lstrip("#")
+    if len(cleaned) != 6:
+        return (140, 140, 140)
+    try:
+        r = int(cleaned[0:2], 16)
+        g = int(cleaned[2:4], 16)
+        b = int(cleaned[4:6], 16)
+        return (b, g, r)
+    except ValueError:
+        return (140, 140, 140)
 
 # Fallback mapping in case YAML file is missing or unreadable
 FALLBACK_CLASS_TO_BIN: Dict[int, Bin] = {
@@ -75,6 +89,22 @@ class BinMapper:
             Bin enum value: ORGANIC, RECYCLABLE, RESIDUAL, or UNKNOWN if unmapped.
         """
         return self._class_to_bin.get(class_id, Bin.UNKNOWN)
+
+    def get_bin_color_hex(self, bin_type: Bin, default: str = "#8C8C8C") -> str:
+        """Get the hex color string configured for a bin in YAML."""
+        info = self._bin_info.get(bin_type.name, {})
+        return str(info.get("color", default))
+
+    def get_bin_color_bgr(self, bin_type: Bin) -> Tuple[int, int, int]:
+        """Get the BGR color tuple configured for a bin in YAML."""
+        if bin_type == Bin.HAZARDOUS:
+            return (38, 38, 220)  # Red warning
+        if bin_type == Bin.UNKNOWN:
+            return (140, 140, 140)  # Neutral grey
+        hex_color = self.get_bin_color_hex(bin_type, "")
+        if hex_color:
+            return hex_to_bgr(hex_color)
+        return (140, 140, 140)
 
 
 # Global singleton instance for convenient import

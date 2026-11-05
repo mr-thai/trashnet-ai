@@ -1,0 +1,30 @@
+# Trash-Net Central Application Configuration (US-2.1 & US-3.1)
+# Allows overriding model, pipeline, camera, smoother, and UI parameters without modifying code.
+
+model:
+  weights_path: "models/best.pt"
+  conf: 0.25
+  iou: 0.45
+  imgsz: 640
+  device: null  # null = auto (CUDA -> MPS -> CPU), or explicitly "cuda", "mps", "cpu"
+  half: null    # null = auto (FP16 on CUDA), or true/false
+
+smoother:
+  enabled: true
+  window_size: 30
+  stability_threshold_sec: 1.5
+  disappear_timeout_sec: 1.0
+  require_confirmation: true
+
+camera:
+  default_index: 0
+  max_probe_index: 6
+  width: 640
+  height: 480
+  fps: 30
+
+ui:
+  window_title: "Trash-Net — Hệ Thống Phân Loại Rác Thông Minh"
+  min_width: 1280
+  min_height: 720
+  theme: "dark"

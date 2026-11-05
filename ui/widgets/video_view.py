@@ -9,7 +9,9 @@ from typing import List, Optional, Tuple, Union
 import cv2
 import numpy as np
 
+from core.mapper import BinMapper
 from core.types import Bin, Detection
+from ui.constants import get_vietnamese_label
 from ui.qt_compat import (
     QBrush,
     QColor,
@@ -30,11 +32,15 @@ from ui.qt_compat import (
 
 VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
+_default_bin_mapper = BinMapper()
+
+# Dynamic BGR colors sourced directly from config/bin_mapping.yaml with fallbacks
 BIN_COLORS_BGR = {
-    Bin.ORGANIC: (50, 168, 82),      # Xanh lá cây (Hữu cơ)
-    Bin.RECYCLABLE: (219, 114, 33),  # Xanh dương (Tái chế)
-    Bin.RESIDUAL: (45, 55, 219),     # Đỏ / Cam (Vô cơ / Khác)
-    Bin.UNKNOWN: (140, 140, 140),    # Xám (Không xác định)
+    Bin.ORGANIC: _default_bin_mapper.get_bin_color_bgr(Bin.ORGANIC),
+    Bin.RECYCLABLE: _default_bin_mapper.get_bin_color_bgr(Bin.RECYCLABLE),
+    Bin.RESIDUAL: _default_bin_mapper.get_bin_color_bgr(Bin.RESIDUAL),
+    Bin.HAZARDOUS: (38, 38, 220),
+    Bin.UNKNOWN: (140, 140, 140),
 }
 
 
@@ -241,7 +247,14 @@ class VideoView(QWidget):
             if has_masks:
                 cv2.addWeighted(overlay, 0.45, annotated, 0.55, 0, annotated)
 
-        # 2. Polygon contours, bounding boxes, labels
+        # 2. Polygon contours, bounding boxes, labels with resolution-adaptive scaling
+        base_dim = max(w, h)
+        line_thickness = max(1, int(round(base_dim / 360.0)))
+        font_scale = max(0.45, min(1.8, (base_dim / 720.0) * 0.5))
+        font_thickness = max(1, int(round(font_scale * 1.8)))
+        pad_x = max(5, int(round(font_scale * 8)))
+        pad_y = max(4, int(round(font_scale * 6)))
+
         for det in detections:
             color = BIN_COLORS_BGR.get(det.bin_type, (140, 140, 140))
             x1, y1, x2, y2 = det.box
@@ -249,22 +262,19 @@ class VideoView(QWidget):
             # Polygon contours (solid boundary with bin color)
             if self._show_masks and det.polygon and len(det.polygon) >= 3:
                 pts = np.array(det.polygon, dtype=np.int32)
-                cv2.polylines(annotated, [pts], isClosed=True, color=color, thickness=2, lineType=cv2.LINE_AA)
+                cv2.polylines(annotated, [pts], isClosed=True, color=color, thickness=line_thickness, lineType=cv2.LINE_AA)
 
             # Bounding box
             if self._show_boxes:
-                cv2.rectangle(annotated, (x1, y1), (x2, y2), color=color, thickness=2, lineType=cv2.LINE_AA)
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color=color, thickness=line_thickness, lineType=cv2.LINE_AA)
 
-            # Label badge (never clipped at boundaries)
+            # Label badge (never clipped at boundaries, compact without redundant group name)
             if self._show_labels:
-                label_text = f"[{det.bin_type.display_name}] {det.class_name} ({det.confidence * 100:.0f}%)"
+                clean_name = get_vietnamese_label(det.class_name, det.class_id)
+                label_text = f"{clean_name} ({det.confidence * 100:.0f}%)"
                 font = cv2.FONT_HERSHEY_SIMPLEX
-                font_scale = 0.5
-                thickness = 1
-                (tw, th), baseline = cv2.getTextSize(label_text, font, font_scale, thickness)
+                (tw, th), baseline = cv2.getTextSize(label_text, font, font_scale, font_thickness)
 
-                pad_x = 5
-                pad_y = 4
                 badge_w = tw + 2 * pad_x
                 badge_h = th + 2 * pad_y + baseline
 
@@ -290,7 +300,7 @@ class VideoView(QWidget):
                     font,
                     font_scale,
                     (255, 255, 255),
-                    thickness,
+                    font_thickness,
                     cv2.LINE_AA,
                 )
 

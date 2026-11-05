@@ -8,11 +8,13 @@ V4L2 backend capture, and background inference without memory leaks.
 
 from pathlib import Path
 import sys
+import time
 from typing import List, Optional
 import cv2
 import numpy as np
 
 from core.audit_log import AuditLogger
+from core.config import AppConfig
 from core.detector import WasteDetector
 from core.flagging import save_flagged_frame
 from core.ood import OODDetector
@@ -53,18 +55,29 @@ from ui.worker import InferenceWorker
 class MainWindow(QMainWindow):
     """Primary GUI window for Trash-Net waste classification."""
 
-    def __init__(self, model_path: Optional[str] = None, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        model_path: Optional[str] = None,
+        config: Optional[AppConfig] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(DEFAULT_WINDOW_TITLE)
+        self.app_config = config or AppConfig.load()
+
+        title = self.app_config.ui.window_title or DEFAULT_WINDOW_TITLE
+        self.setWindowTitle(title)
 
         # DoD: Giao diện hiển thị đúng ở độ phân giải 1280×720 trở lên
-        self.setMinimumSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
-        self.resize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+        min_w = self.app_config.ui.min_width or MIN_WINDOW_WIDTH
+        min_h = self.app_config.ui.min_height or MIN_WINDOW_HEIGHT
+        self.setMinimumSize(min_w, min_h)
+        self.resize(min_w, min_h)
 
         self._current_image_path: Optional[Path] = None
         self._current_frame: Optional[np.ndarray] = None
         self._current_detections: List[Detection] = []
         self._is_inferring_webcam: bool = False
+        self._last_result_list_update_time: float = 0.0
 
         # Load detector if weights exist (checks models/ directory first)
         self.detector: Optional[WasteDetector] = None
@@ -74,8 +87,10 @@ class MainWindow(QMainWindow):
         exe_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path.cwd()
         internal_dir = Path(getattr(sys, "_MEIPASS", exe_dir))
 
+        config_weights = self.app_config.model.weights_path
         candidate_paths = [
             Path(model_path) if model_path and Path(model_path).exists() else None,
+            Path(config_weights) if config_weights and Path(config_weights).exists() else None,
             exe_dir / "models" / "best.pt",
             exe_dir / "best.pt",
             internal_dir / "models" / "best.pt",
@@ -94,7 +109,14 @@ class MainWindow(QMainWindow):
 
         if resolved_path is not None:
             try:
-                self.detector = WasteDetector(model_path=resolved_path)
+                self.detector = WasteDetector(
+                    model_path=resolved_path,
+                    conf=self.app_config.model.conf,
+                    iou=self.app_config.model.iou,
+                    imgsz=self.app_config.model.imgsz,
+                    device=self.app_config.model.device,
+                    half=self.app_config.model.half,
+                )
             except Exception as exc:
                 print(f"[!] Warning: Could not initialize WasteDetector with '{resolved_path}': {exc}")
 
@@ -146,15 +168,14 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(8, 0, 0, 0)
         right_layout.setSpacing(12)
 
-        # 2.1 Bin Banner (Top of right stack)
+        # 2.1 Bin Banner & Guideline Card (Preserved for tests but hidden to focus purely on waste detection)
         self.bin_banner = BinBanner(self)
-        right_layout.addWidget(self.bin_banner)
+        self.bin_banner.hide()
 
-        # 2.2 Guideline Card (US-4.3 Preparation advice)
         self.guideline_card = GuidelineCard(parent=self)
-        right_layout.addWidget(self.guideline_card)
+        self.guideline_card.hide()
 
-        # 2.3 Result Cards List (Middle expanding zone)
+        # 2.2 Result Cards List (Middle expanding zone)
         self.result_list = ResultList(self)
         right_layout.addWidget(self.result_list, stretch=1)
 
@@ -163,6 +184,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.control_panel)
 
         self.splitter.addWidget(right_panel)
+        self.splitter.setSizes([920, 360])
 
         # Set initial splitter stretch weights: 65% video, 35% controls
         self.splitter.setStretchFactor(0, 65)
@@ -181,7 +203,8 @@ class MainWindow(QMainWindow):
     def _refresh_cameras(self) -> None:
         """Scan available system cameras and populate dropdown."""
         try:
-            cameras = list_available_cameras()
+            max_probe = self.app_config.camera.max_probe_index if hasattr(self, "app_config") else 6
+            cameras = list_available_cameras(max_indices=max_probe)
             self.control_panel.populate_cameras(cameras)
         except Exception:
             self.control_panel.populate_cameras([0])
@@ -192,6 +215,8 @@ class MainWindow(QMainWindow):
         self.control_panel.open_video_requested.connect(self.open_video_dialog)
         self.control_panel.toggle_webcam_requested.connect(self.on_toggle_webcam)
         self.control_panel.confidence_changed.connect(self.on_confidence_changed)
+        self.control_panel.iou_changed.connect(self.on_iou_changed)
+        self.control_panel.max_detections_changed.connect(self.on_max_detections_changed)
         self.control_panel.reset_requested.connect(self.reset_all)
         self.control_panel.overlay_options_changed.connect(self.video_view.set_overlay_options)
         self.control_panel.flag_requested.connect(self.on_flag_requested)
@@ -233,19 +258,25 @@ class MainWindow(QMainWindow):
         # Initialize continuous InferenceWorker with size-1 buffer and temporal smoother
         if self.detector is not None:
             conf = self.control_panel.confidence_threshold
-            smoother = TemporalSmoother(
-                window_size=30,
-                stability_threshold_sec=1.5,
-                disappear_timeout_sec=1.0,
-                require_confirmation=True,
-            )
+            iou = self.control_panel.iou_threshold
+            topk = self.control_panel.max_detections
+            smoother = None
+            if self.app_config.smoother.enabled:
+                smoother = TemporalSmoother(
+                    window_size=self.app_config.smoother.window_size,
+                    stability_threshold_sec=self.app_config.smoother.stability_threshold_sec,
+                    disappear_timeout_sec=self.app_config.smoother.disappear_timeout_sec,
+                    require_confirmation=self.app_config.smoother.require_confirmation,
+                )
             self._webcam_worker = InferenceWorker(
-                self.detector, conf=conf, smoother=smoother, parent=self
+                self.detector, conf=conf, iou=iou, max_detections=topk, smoother=smoother, parent=self
             )
             self._webcam_worker.finished_inference.connect(self._on_webcam_inference_finished)
             self._webcam_worker.fps_updated.connect(self.on_inference_fps_updated)
             self._webcam_worker.error_occurred.connect(self._on_webcam_inference_error)
             self.control_panel.confidence_changed.connect(self._webcam_worker.set_confidence)
+            self.control_panel.iou_changed.connect(self._webcam_worker.set_iou)
+            self.control_panel.max_detections_changed.connect(self._webcam_worker.set_max_detections)
             self._webcam_worker.start()
 
         self.status_bar.showMessage(f"Đang kết nối camera #{camera_index} qua V4L2...")
@@ -272,6 +303,8 @@ class MainWindow(QMainWindow):
         if self._webcam_worker is not None:
             try:
                 self.control_panel.confidence_changed.disconnect(self._webcam_worker.set_confidence)
+                self.control_panel.iou_changed.disconnect(self._webcam_worker.set_iou)
+                self.control_panel.max_detections_changed.disconnect(self._webcam_worker.set_max_detections)
             except Exception:
                 pass
             self._webcam_worker.stop(timeout_ms=2000)
@@ -391,7 +424,9 @@ class MainWindow(QMainWindow):
             self.current_worker.wait()
 
         conf = self.control_panel.confidence_threshold
-        self.current_worker = InferenceWorker(self.detector, frame, conf=conf)
+        iou = self.control_panel.iou_threshold
+        topk = self.control_panel.max_detections
+        self.current_worker = InferenceWorker(self.detector, frame, conf=conf, iou=iou, max_detections=topk)
         self.current_worker.finished_inference.connect(self._on_inference_finished)
         self.current_worker.error_occurred.connect(self._on_inference_error)
         self.current_worker.start()
@@ -457,11 +492,37 @@ class MainWindow(QMainWindow):
         elif self._current_frame is not None and self.detector is not None and not self.webcam_thread.isRunning():
             self._start_inference(self._current_frame)
 
+    @Slot(float)
+    def on_iou_changed(self, iou: float) -> None:
+        """Handle NMS IoU threshold slider changes."""
+        self.status_bar.showMessage(f"Ngưỡng IoU khử trùng lặp cập nhật: {iou:.2f}")
+        if self._webcam_worker is not None and self._webcam_worker.is_worker_running:
+            self._webcam_worker.set_iou(iou)
+        elif self._current_frame is not None and self.detector is not None and not self.webcam_thread.isRunning():
+            self._start_inference(self._current_frame)
+
+    @Slot(int)
+    def on_max_detections_changed(self, limit: int) -> None:
+        """Handle Top-K maximum detections limit changes."""
+        lbl = "Tất cả" if limit >= 9999 else f"Top {limit}"
+        self.status_bar.showMessage(f"Giới hạn số lượng hiển thị: {lbl}")
+        if self._webcam_worker is not None and self._webcam_worker.is_worker_running:
+            self._webcam_worker.set_max_detections(limit)
+        elif self._current_frame is not None and self.detector is not None and not self.webcam_thread.isRunning():
+            self._start_inference(self._current_frame)
+
     def update_results(self, detections: List[Detection]) -> None:
-        """Update detection cards and destination bin banner."""
+        """Update detection cards and destination bin banner with UI throttling."""
         checked = self.ood_detector.check_detections(detections) if hasattr(self, "ood_detector") else detections
         self._current_detections = list(checked)
-        self.result_list.set_detections(self._current_detections)
+
+        now = time.monotonic()
+        is_streaming = hasattr(self, "webcam_thread") and self.webcam_thread.isRunning()
+
+        # Throttle heavy QWidget creation for result cards to max 2 updates/sec in webcam mode
+        if not is_streaming or (now - getattr(self, "_last_result_list_update_time", 0.0) >= 0.5):
+            self.result_list.set_detections(self._current_detections)
+            self._last_result_list_update_time = now
 
         if not self._current_detections:
             self.bin_banner.reset()
@@ -472,19 +533,26 @@ class MainWindow(QMainWindow):
             self.bin_banner.set_bin(top_detection.bin_type)
             self.guideline_card.set_guideline(top_detection.class_name)
 
-            # US-4.5: Log confirmed detection with anti-duplication
+            # US-4.5: Only log confirmed detections for static image or hazardous items
             if hasattr(self, "audit_logger") and self.audit_logger is not None:
-                src = "webcam" if (hasattr(self, "webcam_thread") and self.webcam_thread.isRunning()) else "image"
-                for det in self._current_detections:
-                    self.audit_logger.log_detection(
-                        detection=det,
-                        source=src,
-                        is_hazardous=(det.bin_type == Bin.HAZARDOUS),
-                    )
+                if not is_streaming:
+                    for det in self._current_detections:
+                        self.audit_logger.log_detection(
+                            detection=det,
+                            source="image",
+                            is_hazardous=(det.bin_type == Bin.HAZARDOUS),
+                        )
+                else:
+                    for det in self._current_detections:
+                        if det.bin_type == Bin.HAZARDOUS:
+                            self.audit_logger.log_detection(
+                                detection=det,
+                                source="webcam",
+                                is_hazardous=True,
+                            )
 
             self.status_bar.showMessage(
-                f"Phát hiện {len(self._current_detections)} vật thể. "
-                f"Đích đến: {top_detection.bin_type.display_name} ({top_detection.confidence * 100:.1f}%)"
+                f"Phát hiện {len(self._current_detections)} vật thể rác trong khung hình (cao nhất: {top_detection.class_name} {top_detection.confidence * 100:.0f}%)"
             )
 
     @Slot()
@@ -568,10 +636,47 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
-def run_app() -> None:
-    """Launch Trash-Net desktop application."""
-    app = QApplication(sys.argv)
-    window = MainWindow()
+def run_app(argv: Optional[List[str]] = None) -> None:
+    """Launch Trash-Net desktop application with dynamic CLI flag support."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Trash-Net — Hệ Thống Phân Loại Rác Thông Minh",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("-m", "--model", type=str, default=None, help="Path to YOLO weights (.pt)")
+    parser.add_argument("-c", "--conf", type=float, default=None, help="Detection confidence threshold (0.0, 1.0]")
+    parser.add_argument("--iou", type=float, default=None, help="NMS IoU threshold (0.0, 1.0]")
+    parser.add_argument("--imgsz", type=int, default=None, help="Inference square image resolution")
+    parser.add_argument("-d", "--device", type=str, default=None, help="Inference device: 'cuda', 'mps', or 'cpu'")
+    parser.add_argument("--half", action="store_true", default=None, help="Force FP16 half-precision inference")
+    parser.add_argument("--config", type=str, default=None, help="Path to custom app.yaml configuration file")
+    parser.add_argument("--camera", type=int, default=None, help="Default camera device index")
+
+    cli_args = argv if argv is not None else sys.argv[1:]
+    args, qt_args = parser.parse_known_args(cli_args)
+
+    # 1. Load base configuration from YAML
+    app_cfg = AppConfig.load(args.config)
+
+    # 2. Apply CLI flag overrides dynamically
+    if args.model:
+        app_cfg.model.weights_path = args.model
+    if args.conf is not None:
+        app_cfg.model.conf = args.conf
+    if args.iou is not None:
+        app_cfg.model.iou = args.iou
+    if args.imgsz is not None:
+        app_cfg.model.imgsz = args.imgsz
+    if args.device:
+        app_cfg.model.device = args.device
+    if args.half is not None:
+        app_cfg.model.half = args.half
+    if args.camera is not None:
+        app_cfg.camera.default_index = args.camera
+
+    app = QApplication([sys.argv[0]] + qt_args)
+    window = MainWindow(config=app_cfg)
     window.show()
     sys.exit(app.exec())
 

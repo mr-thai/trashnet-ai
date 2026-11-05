@@ -5,7 +5,10 @@ and global UI geometry constraints.
 """
 
 from typing import Dict
+from core.mapper import BinMapper
 from core.types import Bin
+
+_mapper = BinMapper()
 
 # Window geometry specifications (DoD: >= 1280x720)
 MIN_WINDOW_WIDTH = 1280
@@ -61,7 +64,7 @@ BIN_STYLES = {
     Bin.ORGANIC: {
         "title": "THÙNG HỮU CƠ",
         "subtitle": "Rác phân hủy: thức ăn thừa, rau củ quả, lá cây",
-        "bg_color": "#2E7D32",
+        "bg_color": _mapper.get_bin_color_hex(Bin.ORGANIC, "#2E7D32"),
         "text_color": "#FFFFFF",
         "badge_bg": "#1B5E20",
         "icon": "🌱",
@@ -69,7 +72,7 @@ BIN_STYLES = {
     Bin.RECYCLABLE: {
         "title": "THÙNG TÁI CHẾ",
         "subtitle": "Rác tái chế: giấy, nhựa, chai lọ, lon kim loại",
-        "bg_color": "#1565C0",
+        "bg_color": _mapper.get_bin_color_hex(Bin.RECYCLABLE, "#1565C0"),
         "text_color": "#FFFFFF",
         "badge_bg": "#0D47A1",
         "icon": "♻️",
@@ -77,7 +80,7 @@ BIN_STYLES = {
     Bin.RESIDUAL: {
         "title": "THÙNG VÔ CƠ / KHÁC",
         "subtitle": "Rác còn lại: xốp, bao bì màng nilon bẩn, rác trơ",
-        "bg_color": "#C62828",
+        "bg_color": _mapper.get_bin_color_hex(Bin.RESIDUAL, "#C62828"),
         "text_color": "#FFFFFF",
         "badge_bg": "#B71C1C",
         "icon": "🗑️",

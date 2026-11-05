@@ -35,12 +35,16 @@ class InferenceWorker(QThread):
         detector: WasteDetector,
         frame: Optional[np.ndarray] = None,
         conf: Optional[float] = None,
+        iou: Optional[float] = None,
+        max_detections: int = 9999,
         smoother: Optional[TemporalSmoother] = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._detector = detector
         self._conf = conf
+        self._iou = iou
+        self._max_detections = max_detections
         self._smoother = smoother
         self._running = False
         self._single_shot: bool = (frame is not None)
@@ -79,6 +83,18 @@ class InferenceWorker(QThread):
         with self._condition:
             self._conf = float(conf)
             self._pending_conf = float(conf)
+
+    @Slot(float)
+    def set_iou(self, iou: float) -> None:
+        """Thread-safely update NMS IoU threshold for subsequent inferences."""
+        with self._condition:
+            self._iou = float(iou)
+
+    @Slot(int)
+    def set_max_detections(self, max_det: int) -> None:
+        """Thread-safely update Top-K max detections limit."""
+        with self._condition:
+            self._max_detections = int(max_det)
 
     def reset_smoother(self) -> None:
         """Reset internal temporal smoother state."""
@@ -127,8 +143,13 @@ class InferenceWorker(QThread):
                 self.started_inference.emit()
                 start_t = time.perf_counter()
 
-                # Heavy CNN computation
-                detections: List[Detection] = self._detector.detect(frame, conf=conf)
+                # Heavy CNN computation with dynamic IoU and Top-K limit
+                kwargs = {}
+                if hasattr(self, "_iou") and self._iou is not None:
+                    kwargs["iou"] = self._iou
+                detections: List[Detection] = self._detector.detect(frame, conf=conf, **kwargs)
+                if hasattr(self, "_max_detections") and self._max_detections > 0 and len(detections) > self._max_detections:
+                    detections = detections[:self._max_detections]
 
                 # US-4.2 Temporal smoothing & anti-flickering
                 if self._smoother is not None:
