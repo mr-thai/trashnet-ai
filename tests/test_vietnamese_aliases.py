@@ -15,8 +15,6 @@ from core import (
     InvalidFrameError,
     AnhXaThungRac,
     BinMapper,
-    QuanLyHuongDan,
-    GuidelineManager,
     BoLamMuotTheoThoiGian,
     TemporalSmoother,
     DoiTuongTheoDoi,
@@ -38,8 +36,6 @@ from core import (
     # Functions
     anh_xa_thung_rac,
     map_class_to_bin,
-    lay_huong_dan_phan_loai,
-    get_waste_guideline,
     tinh_chi_so_iou,
     compute_iou,
     luu_khung_hinh_nghi_ngo,
@@ -57,7 +53,6 @@ class TestVietnameseAliasesIdentity:
         assert LoiTaiMoHinh is ModelLoadError
         assert LoiKhungHinhKhongHopLe is InvalidFrameError
         assert AnhXaThungRac is BinMapper
-        assert QuanLyHuongDan is GuidelineManager
         assert BoLamMuotTheoThoiGian is TemporalSmoother
         assert DoiTuongTheoDoi is TrackedTarget
         assert TrangThaiTheoDoi is TrackState
@@ -71,7 +66,6 @@ class TestVietnameseAliasesIdentity:
     def test_function_aliases_identity(self):
         """Standalone functions should be identical references."""
         assert anh_xa_thung_rac is map_class_to_bin
-        assert lay_huong_dan_phan_loai is get_waste_guideline
         assert tinh_chi_so_iou is compute_iou
         assert luu_khung_hinh_nghi_ngo is save_flagged_frame
         assert chay_ung_dung is run_app
@@ -81,7 +75,6 @@ class TestVietnameseAliasesIdentity:
         assert WasteDetector.nhan_dien is WasteDetector.detect
         assert WasteDetector.tai_mo_hinh is WasteDetector.load
         assert BinMapper.anh_xa is BinMapper.map_class_to_bin
-        assert GuidelineManager.lay_huong_dan is GuidelineManager.get_guideline
         assert TemporalSmoother.cap_nhat is TemporalSmoother.update
         assert TemporalSmoother.lam_muot is TemporalSmoother.update
         assert TemporalSmoother.dat_lai is TemporalSmoother.reset
@@ -107,19 +100,11 @@ class TestVietnameseAliasesFunctionality:
         iou = tinh_chi_so_iou(box, box)
         assert iou == pytest.approx(1.0)
 
-    def test_lay_huong_dan_phan_loai_execution(self):
-        """Guideline lookup for plastic should return actionable instructions."""
-        guideline = lay_huong_dan_phan_loai("plastic")
-        assert "title" in guideline
-        assert "Nhựa" in guideline["title"]
-        assert len(guideline.get("steps", [])) > 0
-
     def test_docstrings_contain_vietnamese_explanations(self):
         """Core modules should provide rich Vietnamese docstrings for beginners."""
         assert "[GIẢI THÍCH NGHIỆP VỤ" in WasteDetector.__doc__
         assert "[GIẢI THÍCH NGHIỆP VỤ" in WasteDetector.detect.__doc__
         assert "[GIẢI THÍCH NGHIỆP VỤ" in BinMapper.__doc__
-        assert "[GIẢI THÍCH NGHIỆP VỤ" in GuidelineManager.__doc__
         assert "[GIẢI THÍCH NGHIỆP VỤ" in TemporalSmoother.__doc__
         assert "[GIẢI THÍCH NGHIỆP VỤ" in AuditLogger.__doc__
         assert "[GIẢI THÍCH NGHIỆP VỤ" in compute_iou.__doc__

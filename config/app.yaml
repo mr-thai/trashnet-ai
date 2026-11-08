@@ -1,6 +1,3 @@
-# Trash-Net Central Application Configuration (US-2.1 & US-3.1)
-# Allows overriding model, pipeline, camera, smoother, and UI parameters without modifying code.
-
 model:
   weights_path: "models/best.pt"
   conf: 0.25
@@ -24,7 +21,7 @@ camera:
   fps: 30
 
 ui:
-  window_title: "Trash-Net — Hệ Thống Phân Loại Rác Thông Minh"
+  window_title: "Trash-Net — Hệ Thống Nhóm 10"
   min_width: 1280
   min_height: 720
   theme: "dark"

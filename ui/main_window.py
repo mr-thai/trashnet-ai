@@ -47,7 +47,6 @@ from ui.webcam_thread import CameraState, WebcamThread, list_available_cameras
 from ui.widgets.audit_dialog import AuditLogDialog
 from ui.widgets.bin_banner import BinBanner
 from ui.widgets.control_panel import ControlPanel
-from ui.widgets.guideline_card import GuidelineCard
 from ui.widgets.result_card import ResultList
 from ui.widgets.video_view import VideoView
 from ui.worker import InferenceWorker
@@ -170,12 +169,9 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(8, 0, 0, 0)
         right_layout.setSpacing(12)
 
-        # 2.1 Bin Banner & Guideline Card (Preserved for tests but hidden to focus purely on waste detection)
+        # 2.1 Bin Banner
         self.bin_banner = BinBanner(self)
         self.bin_banner.hide()
-
-        self.guideline_card = GuidelineCard(parent=self)
-        self.guideline_card.hide()
 
         # 2.2 Result Cards List (Middle expanding zone)
         self.result_list = ResultList(self)
@@ -693,12 +689,10 @@ class MainWindow(QMainWindow):
 
         if not self._current_detections:
             self.bin_banner.reset()
-            self.guideline_card.reset()
             self.status_bar.showMessage("Không phát hiện rác trong khung hình")
         else:
             top_detection = self._current_detections[0]
             self.bin_banner.set_bin(top_detection.bin_type)
-            self.guideline_card.set_guideline(top_detection.class_name)
 
             # US-4.5: Only log confirmed detections for static image or hazardous items
             if hasattr(self, "audit_logger") and self.audit_logger is not None:
@@ -791,7 +785,6 @@ class MainWindow(QMainWindow):
         self.video_view.clear_frame()
         self.result_list.clear()
         self.bin_banner.reset()
-        self.guideline_card.reset()
         self._current_image_path = None
         self._current_frame = None
         self._current_detections.clear()

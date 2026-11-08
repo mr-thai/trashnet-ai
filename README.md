@@ -3,7 +3,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![PyQt6 / PySide6](https://img.shields.io/badge/GUI-PyQt6%20%7C%20PySide6-green.svg)](https://riverbankcomputing.com/software/pyqt/)
 [![YOLO11n-seg](https://img.shields.io/badge/YOLO11-Segmentation-yellowgreen.svg)](https://github.com/ultralytics/ultralytics)
-[![Tests Passing](https://img.shields.io/badge/tests-120%2F120%20passed-brightgreen.svg)](tests/)
+[![Tests Passing](https://img.shields.io/badge/tests-113%2F113%20passed-brightgreen.svg)](tests/)
 [![Ruff Linter](https://img.shields.io/badge/linter-Ruff%20clean-blueviolet.svg)](https://github.com/astral-sh/ruff)
 [![Mypy Type-Checked](https://img.shields.io/badge/types-Mypy%20verified-informational.svg)](https://mypy-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -32,11 +32,10 @@ Trash-Net là ứng dụng nhận diện và phân đoạn rác thải thời gi
   - **Giới hạn số lượng (Top-K Filter)**: Tùy chọn lọc hiển thị `Tất cả`, `Top 5`, `Top 10`, `Top 15`, `Top 20`, `Top 30` vật thể có độ tin cậy cao nhất.
   - **Bật/Tắt từng lớp đồ họa**: Bật tắt độc lập hiển thị `Mặt nạ`, `Khung bao` và `Nhãn`.
 
-### 4. An Toàn, Kiểm Toán & Hướng Dẫn Phân Loại (Safety & Compliance)
+### 4. An Toàn & Kiểm Toán (Safety & Compliance)
 - **Phát hiện dữ liệu bất thường (OOD Detection)**: Tự động cảnh báo và chuyển sang thùng *Không xác định* đối với các vật thể lạ ngoài phân phối dữ liệu huấn luyện.
 - **Gắn cờ rác nguy hại (Hazardous Waste Flagging)**: Cho phép người dùng báo cáo thủ công các loại rác nguy hại (pin, đồ điện tử...), lưu ảnh JPEG kèm file siêu dữ liệu JSON vào thư mục `flagged/`.
 - **Nhật ký kiểm toán & Xuất báo cáo (Audit Trail & CSV Export)**: Ghi nhận tự động các sự kiện phân loại có cơ chế chống ghi trùng lặp (Cooldown); xuất báo cáo CSV định dạng chuẩn UTF-8 BOM hiển thị chuẩn tiếng Việt trên Microsoft Excel.
-- **Chỉ dẫn xử lý rác trực quan (Guideline Card)**: Cung cấp mẹo sơ chế rác tức thời (rửa sạch, bóp bẹp, tháo nắp...) theo quy chuẩn của từng loại vật liệu.
 
 ---
 
@@ -122,7 +121,6 @@ trash-Net/
 │       ├── control_panel.py# Bảng điều khiển camera, slider Conf, IoU, Top-K & overlay toggles
 │       ├── result_card.py  # Danh sách thẻ kết quả hiển thị rác phát hiện
 │       ├── bin_banner.py   # Banner chỉ dẫn thùng rác quy chuẩn
-│       ├── guideline_card.py # Thẻ hướng dẫn sơ chế và xử lý rác
 │       └── audit_dialog.py # Hộp thoại xem lịch sử kiểm toán & xuất báo cáo CSV
 ├── core/                   # TẦNG NGHIỆP VỤ LÕI (Decoupled, 100% không phụ thuộc GUI)
 │   ├── config.py           # Trình nạp cấu hình tập trung AppConfig & biến môi trường
@@ -132,16 +130,14 @@ trash-Net/
 │   ├── ood.py              # Bộ lọc rác bất thường ngoài phân phối (Out-of-Distribution)
 │   ├── flagging.py         # Module gắn cờ rác nguy hại & xuất JSON metadata
 │   ├── audit_log.py        # Quản lý nhật ký phiên kiểm toán & xuất CSV UTF-8 with BOM
-│   ├── guidelines.py       # Trình tra cứu chỉ dẫn sơ chế rác tiếng Việt
 │   └── types.py            # Kiểu dữ liệu bất biến (Bin enum, Detection dataclass)
 ├── config/                 # CẤU HÌNH TẬP TRUNG (YAML)
 │   ├── app.yaml            # Cấu hình vận hành hệ thống (Model, Camera, Smoother, UI)
-│   ├── bin_mapping.yaml    # Ánh xạ nhãn MultiTrash sang nhóm thùng rác & mã màu
-│   └── guidelines.yaml     # Nội dung hướng dẫn phân loại và sơ chế rác tiếng Việt
+│   └── bin_mapping.yaml    # Ánh xạ nhãn MultiTrash sang nhóm thùng rác & mã màu
 ├── models/                 # TRỌNG SỐ MÔ HÌNH
 │   ├── best.pt             # Trọng số mô hình chính thức (MultiTrash v8 Segmentation)
 │   └── yolo11n-seg.pt      # Trọng số nền tảng Ultralytics YOLO11n
-├── tests/                  # BỘ KIỂM THỬ TỰ ĐỘNG HÓA TOÀN DIỆN (120 Test Cases)
+├── tests/                  # BỘ KIỂM THỬ TỰ ĐỘNG HÓA TOÀN DIỆN (113 Test Cases)
 │   ├── test_config.py      # Kiểm thử nạp YAML, biến môi trường & fallback cấu hình
 │   ├── test_detector.py    # Kiểm thử suy luận, kiểm tra biên ảnh rỗng, IoU, device fallback
 │   ├── test_evaluation_and_accuracy.py # Kiểm định độ chính xác trên Ground Truth thực tế
@@ -149,7 +145,6 @@ trash-Net/
 │   ├── test_smoother.py    # Kiểm thử bộ lọc làm mượt chuỗi thời gian
 │   ├── test_ood_and_flagging.py # Kiểm định phát hiện OOD và gắn cờ rác nguy hại
 │   ├── test_audit_log.py   # Kiểm thử nhật ký phiên và xuất báo cáo CSV
-│   ├── test_guidelines.py  # Kiểm thử nội dung hướng dẫn sơ chế
 │   ├── test_structure.py   # Kiểm thử tính độc lập của tầng core (Zero GUI import)
 │   ├── test_ui.py          # Kiểm thử 37 ca kiểm thử giao diện & đa luồng
 │   ├── test_video_thread.py# Kiểm thử luồng phân tích video quét theo nhịp AI
@@ -174,14 +169,14 @@ ruff check --no-cache core/ ui/ main.py
 # 2. Kiểm tra an toàn kiểu dữ liệu tĩnh với Mypy
 mypy core/
 
-# 3. Chạy toàn bộ 120 bài kiểm thử tự động (Headless offscreen)
+# 3. Chạy toàn bộ 113 bài kiểm thử tự động (Headless offscreen)
 QT_QPA_PLATFORM=offscreen pytest tests/ -v
 ```
 
 **Kết quả kiểm chuẩn v1.0.0:**
 - **Ruff Linter:** `All checks passed!` (0 cảnh báo, 0 lỗi cú pháp).
 - **Mypy Type-Checker:** `Success: no issues found in 10 source files` (100% Type-safe).
-- **Pytest Suite:** **120 / 120 tests PASSED** (Thời gian chạy: ~25-35s).
+- **Pytest Suite:** **113 / 113 tests PASSED** (Thời gian chạy: ~25-35s).
 
 ---
 

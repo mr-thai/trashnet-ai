@@ -25,12 +25,6 @@ from core.detector import (
     LoiKhungHinhKhongHopLe,
 )
 from core.flagging import save_flagged_frame, luu_khung_hinh_nghi_ngo
-from core.guidelines import (
-    GuidelineManager,
-    get_waste_guideline,
-    QuanLyHuongDan,
-    lay_huong_dan_phan_loai,
-)
 from core.mapper import BinMapper, map_class_to_bin, AnhXaThungRac, anh_xa_thung_rac
 from core.ood import OODDetector, BoKiemTraVatTheLa
 from core.smoother import (
@@ -67,8 +61,6 @@ __all__ = [
     "compute_iou",
     "OODDetector",
     "save_flagged_frame",
-    "GuidelineManager",
-    "get_waste_guideline",
     # Vietnamese aliases (Bí danh tiếng Việt cho người mới dễ tiếp cận)
     "MucKiemToan",
     "NhatKyHeThong",
@@ -90,6 +82,4 @@ __all__ = [
     "tinh_chi_so_iou",
     "BoKiemTraVatTheLa",
     "luu_khung_hinh_nghi_ngo",
-    "QuanLyHuongDan",
-    "lay_huong_dan_phan_loai",
 ]
