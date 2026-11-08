@@ -9,7 +9,7 @@ from collections import Counter, defaultdict
 import os
 from pathlib import Path
 import sys
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set
 import yaml
 
 EXPECTED_IMAGE_COUNTS = {
@@ -255,7 +255,6 @@ class DatasetValidator:
         print("\n[1] Image & Label Counts by Split:")
         print(f"{'Split':<10} | {'Found Imgs':<12} | {'Expected Imgs':<14} | {'Diff':<8} | {'Labels':<10} | {'Status'}")
         print("-" * 72)
-        all_counts_match = True
         for split in self.splits:
             found = self.split_img_counts.get(split, 0)
             expected = EXPECTED_IMAGE_COUNTS.get(split, 0)
@@ -263,8 +262,6 @@ class DatasetValidator:
             diff_str = f"{diff:+d}" if diff != 0 else "0"
             lbls = self.split_lbl_counts.get(split, 0)
             status = "MATCH" if diff == 0 else "MISMATCH"
-            if diff != 0:
-                all_counts_match = False
             print(f"{split:<10} | {found:<12} | {expected:<14} | {diff_str:<8} | {lbls:<10} | {status}")
 
         # Pair verification

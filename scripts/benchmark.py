@@ -123,7 +123,7 @@ def run_benchmark(
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark Trash-Net WasteDetector performance.")
-    parser.add_argument("--weights", type=Path, default=Path("yolo11n-seg.pt"), help="Path to model weights")
+    parser.add_argument("--weights", type=Path, default=Path("models/best.pt"), help="Path to model weights")
     parser.add_argument("--image", type=Path, default=Path("tests/data/sample_waste.jpg"), help="Path to benchmark image")
     parser.add_argument("--frames", type=int, default=100, help="Number of benchmark iterations (default: 100)")
     parser.add_argument("--device", type=str, default="cpu", help="Device to benchmark on ('cpu' or 'cuda')")

@@ -1,7 +1,8 @@
-"""Waste preparation guidelines manager for Trash-Net (US-4.3).
+"""Quản lý cẩm nang hướng dẫn sơ chế và phân loại rác thải Trash-Net.
 
-Provides accessible preprocessing advice for 8 MultiTrash classes
-loaded from external YAML configuration.
+[KIẾN TRÚC & LUỒNG HOẠT ĐỘNG]:
+1. Cung cấp hướng dẫn sơ chế rác trực quan (rửa sạch, bóp bẹp, tháo nắp...) cho 8 loại rác.
+2. Tải dữ liệu từ config/guidelines.yaml; nếu lỗi tự động sử dụng cấu hình dự phòng an toàn.
 """
 
 from pathlib import Path
@@ -90,7 +91,12 @@ FALLBACK_GUIDELINES: Dict[str, Dict[str, Any]] = {
 
 
 class GuidelineManager:
-    """Manages waste preparation advice for all waste categories."""
+    """Manages waste preparation advice for all waste categories.
+
+    [GIẢI THÍCH NGHIỆP VỤ - QUẢN LÝ HƯỚNG DẪN XỬ LÝ RÁC]:
+    Cung cấp lời khuyên xử lý sơ bộ và các bước chuẩn bị rác (súc rửa, tháo nắp, bóp bẹp...)
+    cho 8 loại rác thải MultiTrash, tải cấu hình từ config/guidelines.yaml hoặc dùng bộ dự phòng.
+    """
 
     def __init__(self, config_path: Optional[Union[str, Path]] = None) -> None:
         """Initialize GuidelineManager with external YAML file."""
@@ -112,24 +118,43 @@ class GuidelineManager:
             self._guidelines = dict(FALLBACK_GUIDELINES)
 
     def get_guideline(self, class_name: str) -> Dict[str, Any]:
-        """Fetch preparation steps and advice dictionary for a given waste class name."""
+        """Truy xuất từ điển các bước chuẩn bị và lời khuyên theo tên lớp rác."""
         normalized = class_name.strip().lower()
         return self._guidelines.get(normalized, self._guidelines["unknown"])
 
     def get_steps(self, class_name: str) -> List[str]:
-        """Get bulleted actionable steps for a class."""
+        """Lấy danh sách các bước hành động cụ thể cho từng loại rác."""
         info = self.get_guideline(class_name)
         return info.get("steps", [])
 
     def get_quick_tip(self, class_name: str) -> str:
-        """Get brief one-liner tip for a class."""
+        """Lấy câu mẹo tóm tắt nhanh một dòng cho loại rác."""
         info = self.get_guideline(class_name)
         return info.get("tip", "")
+
+    # =========================================================================
+    # BÍ DANH TIẾNG VIỆT (VIETNAMESE METHOD ALIASES)
+    # =========================================================================
+    lay_huong_dan = get_guideline
+    lay_cac_buoc = get_steps
+    lay_meo_nhanh = get_quick_tip
 
 
 _default_guideline_manager = GuidelineManager()
 
 
 def get_waste_guideline(class_name: str) -> Dict[str, Any]:
-    """Convenience helper to retrieve waste advice."""
+    """Convenience helper to retrieve waste advice.
+
+    [GIẢI THÍCH NGHIỆP VỤ - LẤY HƯỚNG DẪN XỬ LÝ RÁC]:
+    Truy vấn hướng dẫn phân loại và các bước xử lý sơ bộ theo tên lớp rác (ví dụ: 'plastic', 'glass').
+    """
     return _default_guideline_manager.get_guideline(class_name)
+
+
+# =============================================================================
+# BÍ DANH HÀM & LỚP TIẾNG VIỆT (VIETNAMESE FUNCTION & CLASS ALIASES)
+# =============================================================================
+QuanLyHuongDan = GuidelineManager
+lay_huong_dan_phan_loai = get_waste_guideline
+

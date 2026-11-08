@@ -1,8 +1,10 @@
-"""Temporal smoothing and anti-flickering module for Trash-Net (US-4.2).
+"""Module làm mượt theo thời gian và khử rung nhấp nháy nhãn rác (Temporal Smoother).
 
-Provides tracking by Intersection-over-Union (IoU) and confidence-weighted
-majority voting over a sliding window of frames. Enforces real-time temporal
-consistency (1.5 seconds threshold) to prevent label flickering and false alarms.
+[KIẾN TRÚC & LUỒNG HOẠT ĐỘNG]:
+1. Theo dõi vật thể liên tục qua chuỗi khung hình video dựa trên mức độ chồng khớp bounding box (IoU tracking).
+2. Áp dụng cơ chế bỏ phiếu theo trọng số độ tin cậy trong cửa sổ trượt (Sliding window voting).
+3. Đòi hỏi nhãn rác phải ổn định liên tục tối thiểu 1.5 giây trước khi xác nhận đổi nhãn (State Machine: TENTATIVE -> CONFIRMED).
+4. Tự động loại bỏ các nhiễu nhấp nháy tức thời (glitches) và giải phóng các vật thể đã rời khỏi camera.
 """
 
 from collections import defaultdict, deque
@@ -17,6 +19,12 @@ from core.types import Bin, Detection
 
 def compute_iou(box_a: Tuple[int, int, int, int], box_b: Tuple[int, int, int, int]) -> float:
     """Calculate Intersection over Union (IoU) between two bounding boxes (x1, y1, x2, y2).
+
+    [GIẢI THÍCH NGHIỆP VỤ - TÍNH DIỆN TÍCH GIAO TRÊN DIỆN TÍCH HỢP (IoU)]:
+    Đo mức độ trùng khớp giữa 2 khung bounding box:
+    - Giá trị = 1.0: Trùng khít hoàn toàn.
+    - Giá trị = 0.0: Không chạm nhau.
+    Dùng để nhận biết xem vật thể ở khung hình hiện tại có trùng với vật thể ở khung trước hay không.
 
     Args:
         box_a: (x1, y1, x2, y2) of the first box.
@@ -66,12 +74,12 @@ class TrackedTarget:
     current_box: Tuple[int, int, int, int] = (0, 0, 0, 0)
     current_polygon: List[Tuple[int, int]] = field(default_factory=list)
 
-    # Confirmed stable classification
+    # Nhãn rác đã xác nhận ổn định (Confirmed)
     confirmed_class_id: Optional[int] = None
     confirmed_class_name: Optional[str] = None
     confirmed_bin_type: Optional[Bin] = None
 
-    # Candidate classification under stability observation
+    # Nhãn rác ứng viên đang trong thời gian theo dõi ổn định (Candidate)
     candidate_class_id: Optional[int] = None
     candidate_class_name: Optional[str] = None
     candidate_bin_type: Optional[Bin] = None
@@ -83,13 +91,13 @@ class TrackedTarget:
         timestamp: float,
         stability_threshold_sec: float = 1.5,
     ) -> None:
-        """Update track with newly matched detection and compute smoothed label."""
+        """Cập nhật vết theo dõi với phát hiện mới và tính toán nhãn làm mượt."""
         self.history.append((timestamp, det))
         self.current_box = det.box
         self.current_polygon = det.polygon
         self.last_seen = timestamp
 
-        # 1. Confidence-weighted majority voting over sliding window history
+        # 1. Bỏ phiếu số đông có trọng số độ tin cậy trong cửa sổ trượt
         scores: Dict[Tuple[int, str, Bin], float] = defaultdict(float)
         for _, sample in self.history:
             key = (sample.class_id, sample.class_name, sample.bin_type)
@@ -101,9 +109,9 @@ class TrackedTarget:
         best_key = max(scores.keys(), key=lambda k: scores[k])
         best_class_id, best_class_name, best_bin_type = best_key
 
-        # 2. Temporal consistency state machine
+        # 2. Máy trạng thái tính ổn định theo thời gian
         if self.confirmed_class_name is None:
-            # Still in TENTATIVE state: need consistent detection for >= stability_threshold_sec
+            # Trạng thái TENTATIVE: Cần xuất hiện ổn định liên tục >= 1.5 giây
             if self.candidate_class_name != best_class_name:
                 self.candidate_class_id = best_class_id
                 self.candidate_class_name = best_class_name
@@ -117,17 +125,16 @@ class TrackedTarget:
                     self.confirmed_bin_type = self.candidate_bin_type
                     self.state = TrackState.CONFIRMED
         else:
-            # Already in CONFIRMED state
+            # Đã ở trạng thái CONFIRMED
             self.state = TrackState.CONFIRMED
 
             if det.class_name == self.confirmed_class_name:
-                # Incoming detection matches confirmed label -> stable
                 self.candidate_class_id = None
                 self.candidate_class_name = None
                 self.candidate_bin_type = None
                 self.candidate_first_seen = timestamp
             else:
-                # Alternative class is detected
+                # Xuất hiện nhãn rác thay thế khác
                 if self.candidate_class_name != det.class_name:
                     self.candidate_class_id = det.class_id
                     self.candidate_class_name = det.class_name
@@ -136,7 +143,7 @@ class TrackedTarget:
                 else:
                     elapsed = timestamp - self.candidate_first_seen
                     if elapsed >= stability_threshold_sec:
-                        # Consistent for >= 1.5s -> switch confirmed label
+                        # Đã duy trì liên tục >= 1.5 giây -> Cho phép chuyển nhãn
                         self.confirmed_class_id = self.candidate_class_id
                         self.confirmed_class_name = self.candidate_class_name
                         self.confirmed_bin_type = self.candidate_bin_type
@@ -145,19 +152,11 @@ class TrackedTarget:
                         self.candidate_bin_type = None
 
     def mark_missed(self) -> None:
-        """Mark track as missing in the current frame."""
+        """Đánh dấu vết theo dõi bị tạm mất trong khung hình hiện tại."""
         self.state = TrackState.LOST
 
     def get_smoothed_detection(self, require_confirmation: bool = True) -> Optional[Detection]:
-        """Produce the smoothed Detection object for rendering and reporting.
-
-        Args:
-            require_confirmation: If True, only returns detection when state is CONFIRMED.
-                                   If False, returns candidate detection if available.
-
-        Returns:
-            Smoothed Detection or None if unconfirmed/empty.
-        """
+        """Tạo đối tượng Detection đã được làm mượt phục vụ hiển thị và xuất báo cáo."""
         if require_confirmation and self.state != TrackState.CONFIRMED:
             return None
 
@@ -192,9 +191,10 @@ class TrackedTarget:
 class TemporalSmoother:
     """Multi-object temporal smoother and anti-flicker tracker (US-4.2).
 
-    Maintains a sliding window of historical detections per tracked object.
-    Requires continuous 1.5s consistency before updating displayed class and bin,
-    filters brief glitches, and prunes objects after departure.
+    [GIẢI THÍCH NGHIỆP VỤ - BỘ LÀM MƯỢT KHUNG HÌNH CHỐNG NHẤP NHÁY]:
+    Theo dõi vật thể qua chuỗi khung hình video liên tục (Tracking by IoU).
+    Áp dụng cửa sổ trượt (sliding window) và yêu cầu nhận diện nhất quán liên tục trong 1.5 giây
+    trước khi xác nhận đổi nhãn hiển thị rác, giúp triệt tiêu hiện tượng nhấp nháy (flickering).
     """
 
     def __init__(
@@ -255,9 +255,8 @@ class TemporalSmoother:
         matched_track_ids = set()
         unmatched_detections: List[Detection] = []
 
-        # 1. Greedy IoU matching between existing tracks and new detections
+        # Bước 1: Khớp tham lam (Greedy IoU matching) giữa các vết đang theo dõi và phát hiện mới
         if self._tracks and detections:
-            # Build list of all candidate pairs (iou, track_id, det_idx)
             candidate_pairs = []
             for track_id, track in self._tracks.items():
                 for det_idx, det in enumerate(detections):
@@ -265,7 +264,6 @@ class TemporalSmoother:
                     if iou >= self.iou_threshold:
                         candidate_pairs.append((iou, track_id, det_idx))
 
-            # Sort candidate pairs by IoU score descending
             candidate_pairs.sort(key=lambda x: x[0], reverse=True)
 
             used_det_indices = set()
@@ -273,7 +271,6 @@ class TemporalSmoother:
                 if track_id in matched_track_ids or det_idx in used_det_indices:
                     continue
 
-                # Match found: update track
                 det = detections[det_idx]
                 self._tracks[track_id].update_detection(
                     det=det,
@@ -289,12 +286,12 @@ class TemporalSmoother:
         else:
             unmatched_detections = list(detections)
 
-        # 2. Mark unmatched existing tracks as missed
+        # Bước 2: Đánh dấu các vết không tìm thấy trong khung hình hiện tại là tạm mất (LOST)
         for track_id, track in self._tracks.items():
             if track_id not in matched_track_ids:
                 track.mark_missed()
 
-        # 3. Create new tracks for unmatched detections
+        # Bước 3: Khởi tạo vết theo dõi mới cho các phát hiện chưa được khớp
         for det in unmatched_detections:
             new_track = TrackedTarget(
                 track_id=self._next_track_id,
@@ -313,7 +310,7 @@ class TemporalSmoother:
             self._tracks[self._next_track_id] = new_track
             self._next_track_id += 1
 
-        # 4. Prune tracks that have disappeared beyond disappear_timeout_sec
+        # Bước 4: Xóa bỏ các vết đã biến mất quá thời gian chờ (disappear_timeout_sec)
         expired_track_ids = [
             tid
             for tid, trk in self._tracks.items()
@@ -322,7 +319,7 @@ class TemporalSmoother:
         for tid in expired_track_ids:
             del self._tracks[tid]
 
-        # 5. Extract smoothed detections
+        # Bước 5: Trích xuất danh sách các đối tượng nhận diện đã làm mượt
         smoothed_results: List[Detection] = []
         for track in self._tracks.values():
             smoothed_det = track.get_smoothed_detection(
@@ -331,6 +328,22 @@ class TemporalSmoother:
             if smoothed_det is not None:
                 smoothed_results.append(smoothed_det)
 
-        # Sort by confidence descending
         smoothed_results.sort(key=lambda d: d.confidence, reverse=True)
         return smoothed_results
+
+    # =========================================================================
+    # BÍ DANH TIẾNG VIỆT (VIETNAMESE METHOD ALIASES)
+    # =========================================================================
+    cap_nhat = update
+    lam_muot = update
+    dat_lai = reset
+
+
+# =============================================================================
+# BÍ DANH HÀM & LỚP TIẾNG VIỆT (VIETNAMESE FUNCTION & CLASS ALIASES)
+# =============================================================================
+BoLamMuotTheoThoiGian = TemporalSmoother
+tinh_chi_so_iou = compute_iou
+TrangThaiTheoDoi = TrackState
+DoiTuongTheoDoi = TrackedTarget
+

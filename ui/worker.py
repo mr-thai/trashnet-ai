@@ -1,8 +1,9 @@
-"""Background inference worker thread using QThread (US-3.3 & US-3.4).
+"""Tiến trình chạy suy luận mô hình ngầm (Inference Worker Thread) dùng QThread.
 
-Runs model inference asynchronously off the main GUI thread to prevent UI freezing.
-Implements a size-1 buffer (latest-frame-wins) to drop intermediate frames when
-inference is slower than the camera capture rate.
+[KIẾN TRÚC & LUỒNG HOẠT ĐỘNG]:
+1. Tách biệt hoàn toàn tính toán mô hình YOLO nặng khỏi Main GUI Thread để tránh giật đơ giao diện.
+2. Thiết kế bộ đệm kích thước 1 (size-1 buffer): khung hình mới nhất luôn ghi đè khung chưa kịp xử lý.
+3. Hỗ trợ cả 2 chế độ: Đơn khung hình (cho ảnh tĩnh) và Dòng liên tục (cho webcam/video).
 """
 
 import threading
@@ -17,16 +18,11 @@ from ui.qt_compat import QThread, Signal, Slot
 
 
 class InferenceWorker(QThread):
-    """Worker thread that executes WasteDetector inference asynchronously.
+    """Tiến trình ngầm thực thi suy luận WasteDetector độc lập với luồng giao diện."""
 
-    Supports both single-shot mode (for static images) and continuous streaming mode
-    with a size-1 buffer (for real-time webcam streams).
-    """
-
-    # Signals
     started_inference = Signal()
-    finished_inference = Signal(np.ndarray, list, float)  # (frame, detections, latency_ms)
-    fps_updated = Signal(float)  # current inference FPS
+    finished_inference = Signal(np.ndarray, list, float)
+    fps_updated = Signal(float)
     error_occurred = Signal(str)
 
     def __init__(
@@ -118,19 +114,19 @@ class InferenceWorker(QThread):
                 self.wait(500)
 
     def run(self) -> None:
-        """Execute inference loop off the GUI thread."""
+        """Vòng lặp thực thi suy luận ngầm độc lập với luồng GUI."""
         self._running = True
 
         while self._running and not self.isInterruptionRequested():
             with self._condition:
                 while self._running and not self.isInterruptionRequested() and self._pending_frame is None:
-                    # Wait for next frame without busy-waiting
+                    # Chờ khung hình mới mà không tốn CPU (Condition wait)
                     self._condition.wait(timeout=0.1)
 
                 if not self._running or self.isInterruptionRequested():
                     break
 
-                # Atomically extract latest frame and clear slot
+                # Lấy khung hình mới nhất và dọn sạch slot (size-1 buffer)
                 frame = self._pending_frame
                 conf = self._pending_conf if self._pending_conf is not None else self._conf
                 self._pending_frame = None
@@ -142,7 +138,6 @@ class InferenceWorker(QThread):
                 self.started_inference.emit()
                 start_t = time.perf_counter()
 
-                # Heavy CNN computation with dynamic IoU and Top-K limit
                 kwargs = {}
                 if hasattr(self, "_iou") and self._iou is not None:
                     kwargs["iou"] = self._iou
@@ -150,7 +145,7 @@ class InferenceWorker(QThread):
                 if hasattr(self, "_max_detections") and self._max_detections > 0 and len(detections) > self._max_detections:
                     detections = detections[:self._max_detections]
 
-                # US-4.2 Temporal smoothing & anti-flickering
+                # Áp dụng bộ làm mượt TemporalSmoother để chống rung nhấp nháy nhãn
                 if self._smoother is not None:
                     detections = self._smoother.update(detections)
 

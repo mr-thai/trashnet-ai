@@ -1,7 +1,9 @@
-"""Manual reporting and hazardous waste flagging system (US-4.4).
+"""Hệ thống báo cáo thủ công và gắn cờ rác nguy hại (Hazardous Waste Flagging).
 
-Persists flagged camera frames and structured JSON metadata to the `flagged/`
-directory for safety logging and future retraining dataset collection.
+[KIẾN TRÚC & LUỒNG HOẠT ĐỘNG]:
+1. Lưu lại khung hình ảnh JPEG vào thư mục `flagged/`.
+2. Tạo file JSON metadata tương ứng chứa nhãn rác, độ tin cậy, tọa độ bounding box và ghi chú người dùng.
+3. Dữ liệu này phục vụ kiểm toán an toàn và thu thập mẫu cho các đợt tái huấn luyện mô hình.
 """
 
 from datetime import datetime
@@ -23,6 +25,11 @@ def save_flagged_frame(
 ) -> Tuple[Path, Path]:
     """Save the current frame image and metadata JSON into the flagged directory.
 
+    [GIẢI THÍCH NGHIỆP VỤ - LƯU KHUNG HÌNH NGHI NGỜ / NGUY HẠI]:
+    Lưu lại ảnh JPEG chụp từ màn hình kèm file metadata JSON ghi rõ thời gian,
+    các bounding box nhận diện, cờ đánh dấu rác nguy hại (pin, ắc quy...) và ghi chú người dùng.
+    Dữ liệu này được lưu vào thư mục `flagged/` phục vụ kiểm toán và tái huấn luyện mô hình.
+
     Args:
         frame: OpenCV BGR image array.
         detections: List of current active Detection objects.
@@ -43,10 +50,8 @@ def save_flagged_frame(
     img_path = out_dir / f"{base_name}.jpg"
     json_path = out_dir / f"{base_name}.json"
 
-    # Save frame as JPEG
     cv2.imwrite(str(img_path), frame)
 
-    # Format structured metadata
     metadata: Dict[str, Any] = {
         "timestamp": timestamp_str,
         "image_filename": img_path.name,
@@ -69,3 +74,10 @@ def save_flagged_frame(
         json.dump(metadata, f, indent=2, ensure_ascii=False)
 
     return img_path, json_path
+
+
+# =============================================================================
+# BÍ DANH HÀM TIẾNG VIỆT (VIETNAMESE FUNCTION ALIASES)
+# =============================================================================
+luu_khung_hinh_nghi_ngo = save_flagged_frame
+

@@ -1,8 +1,10 @@
-"""Model wrapper for YOLO instance segmentation in Trash-Net (US-2.1 & US-2.3).
+"""Lớp bao đóng (wrapper) mô hình phân đoạn YOLO phục vụ nhận diện rác thải Trash-Net.
 
-Decoupled from GUI frameworks (PyQt/PySide) and Ultralytics internals.
-Handles device detection, model loading, warm-up, FP16/half-precision optimization,
-and returns structured Detection objects with bin mappings sorted by confidence.
+[KIẾN TRÚC & LUỒNG HOẠT ĐỘNG]:
+1. Tự động nhận diện phần cứng (CUDA GPU -> Apple Silicon MPS -> CPU).
+2. Tải trọng số mô hình (.pt), thực hiện khởi động ấm (warm-up) để nạp trước kernel tính toán.
+3. Chạy suy luận với cơ chế phòng vệ chống tràn bộ nhớ GPU (OOM Fallback).
+4. Phân tích kết quả: Bounding box, polygon mask và tự động ánh xạ loại rác vào thùng chứa.
 """
 
 from pathlib import Path
@@ -27,6 +29,12 @@ class InvalidFrameError(ValueError):
 
 class WasteDetector:
     """Wrapper class around YOLO segmentation model for waste detection.
+
+    [GIẢI THÍCH NGHIỆP VỤ - BỘ NHẬN DIỆN RÁC THẢI]:
+    Lớp bao đóng (wrapper) mô hình phân đoạn YOLO phục vụ nhận diện rác thải.
+    Tách biệt hoàn toàn với giao diện PyQt và chi tiết bên trong Ultralytics.
+    Tự động chọn phần cứng (CUDA GPU -> Apple Silicon MPS -> CPU), nạp trọng số (.pt),
+    chạy khởi động ấm (warmup), và chuyển đổi kết quả thành danh sách đối tượng Detection.
 
     Attributes:
         model_path (Path): Path to model weights file (.pt).
@@ -78,7 +86,7 @@ class WasteDetector:
         self.imgsz = imgsz
         self.mapper = bin_mapper or BinMapper()
 
-        # Auto-detect hardware device: CUDA -> MPS -> CPU with graceful fallback
+        # Tự động chọn thiết bị tính toán tối ưu: CUDA -> MPS -> CPU
         if device is None:
             if torch.cuda.is_available():
                 self._device = "cuda"
@@ -93,7 +101,7 @@ class WasteDetector:
             else:
                 self._device = dev_str
 
-        # Configure FP16 half precision: auto-enable on CUDA unless explicitly set
+        # Tự động bật FP16 trên GPU CUDA để tăng tốc độ suy luận
         if half is None:
             self.half = bool(self._device.startswith("cuda") and torch.cuda.is_available())
         else:
@@ -107,33 +115,37 @@ class WasteDetector:
 
     @property
     def device(self) -> str:
-        """Get the active computation device name ('cuda', 'mps', or 'cpu')."""
+        """Tên thiết bị tính toán đang hoạt động ('cuda', 'mps', hoặc 'cpu')."""
         return self._device
 
     @property
     def half_precision(self) -> bool:
-        """Get whether FP16 half-precision is enabled."""
+        """Trạng thái kích hoạt độ chính xác nửa FP16."""
         return self.half
 
     @property
     def iou_threshold(self) -> float:
-        """Get the default NMS IoU threshold."""
+        """Ngưỡng IoU khử trùng lặp NMS mặc định."""
         return self.iou
 
     @property
     def model_path(self) -> Path:
-        """Get path to currently loaded model weights."""
+        """Đường dẫn đến file trọng số mô hình hiện tại."""
         return self._model_path
 
     @property
     def names(self) -> dict:
-        """Get mapping of class_id to class name from loaded model."""
+        """Bảng ánh xạ class_id sang tên lớp rác từ mô hình."""
         if self._model is not None and hasattr(self._model, "names"):
             return self._model.names
         return {}
 
     def load(self, model_path: Union[str, Path]) -> None:
         """Load model weights from disk.
+
+        [GIẢI THÍCH NGHIỆP VỤ - TẢI MÔ HÌNH]:
+        Nạp file trọng số YOLO (.pt) từ ổ đĩa và khởi tạo instance YOLO.
+        Kiểm tra file tồn tại và bắt các ngoại lệ hỏng file để ném ra ModelLoadError.
 
         Args:
             model_path: Path to .pt model weights file.
@@ -161,7 +173,7 @@ class WasteDetector:
             ) from exc
 
     def _warmup(self) -> None:
-        """Execute one forward pass with a dummy blank image to prime GPU/CPU kernels."""
+        """Thực hiện một lượt suy luận giả định để nạp sẵn kernel tính toán vào GPU/CPU."""
         if self._model is None:
             return
         try:
@@ -175,7 +187,7 @@ class WasteDetector:
                 verbose=False,
             )
         except Exception:
-            # If warmup fails on GPU (e.g. CUDA OOM or driver issue), fallback to CPU
+            # Nếu khởi động GPU thất bại (tràn VRAM hoặc lỗi driver), tự động lùi về CPU
             if self._device.startswith("cuda"):
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -202,9 +214,12 @@ class WasteDetector:
     ) -> List[Detection]:
         """Perform instance segmentation inference on an input frame.
 
-        Passes BGR frame directly to YOLO (Ultralytics handles internal color formatting),
-        parses raw predictions, converts polygon masks to original image pixel coordinates,
-        maps classes to sorting bins, and returns structured Detection objects sorted descending by confidence.
+        [GIẢI THÍCH NGHIỆP VỤ - NHẬN DIỆN RÁC THẢI]:
+        1. Tiếp nhận khung hình mảng numpy ảnh BGR từ Webcam hoặc File ảnh.
+        2. Chạy dự đoán phân đoạn đối tượng (Instance Segmentation) qua YOLO.
+        3. Phân tích kết quả: Tọa độ bounding box, đa giác polygon mask, nhãn lớp.
+        4. Ánh xạ từng loại rác vào thùng tương ứng (Tái chế / Hữu cơ / Vô cơ).
+        5. Trả về danh sách đối tượng Detection sắp xếp giảm dần theo độ tin cậy.
 
         Args:
             frame: Numpy ndarray of shape (H, W, 3) representing an image in BGR format.
@@ -243,7 +258,7 @@ class WasteDetector:
         if self._model is None:
             raise ModelLoadError("Model is not initialized.")
 
-        # Execute prediction with GPU OOM protection and automatic CPU fallback
+        # Chạy suy luận với cơ chế bảo vệ chống tràn VRAM GPU (OOM Fallback sang CPU)
         try:
             raw_results: Any = self._model.predict(
                 source=frame,
@@ -278,14 +293,13 @@ class WasteDetector:
         if result.boxes is None or len(result.boxes) == 0:
             return detections
 
-        boxes_data = result.boxes.xyxy.cpu().numpy()  # [[x1, y1, x2, y2], ...]
-        conf_data = result.boxes.conf.cpu().numpy()    # [conf, ...]
-        cls_data = result.boxes.cls.cpu().numpy()      # [cls_id, ...]
+        boxes_data = result.boxes.xyxy.cpu().numpy()
+        conf_data = result.boxes.conf.cpu().numpy()
+        cls_data = result.boxes.cls.cpu().numpy()
 
-        # Extract polygon contours if segmentation masks exist
         masks_xy = None
         if result.masks is not None and hasattr(result.masks, "xy"):
-            masks_xy = result.masks.xy  # List of (N, 2) arrays in original image pixel coords
+            masks_xy = result.masks.xy
 
         for idx in range(len(boxes_data)):
             x1, y1, x2, y2 = boxes_data[idx]
@@ -300,7 +314,6 @@ class WasteDetector:
             class_name = self.names.get(class_id, f"class_{class_id}")
             bin_type = self.mapper.map_class_to_bin(class_id)
 
-            # Extract polygon pixel coordinates using vectorized NumPy operations
             polygon_pts: List[Tuple[int, int]] = []
             if masks_xy is not None and idx < len(masks_xy) and len(masks_xy[idx]) > 0:
                 pts = np.asarray(masks_xy[idx], dtype=np.float32)
@@ -317,7 +330,6 @@ class WasteDetector:
                         (box_int[0], box_int[3]),
                     ]
             else:
-                # Fallback: 4 corners of bounding box if mask is missing
                 polygon_pts = [
                     (box_int[0], box_int[1]),
                     (box_int[2], box_int[1]),
@@ -336,6 +348,22 @@ class WasteDetector:
                 )
             )
 
-        # Sort descending by confidence score (AC requirement)
         detections.sort(key=lambda d: d.confidence, reverse=True)
         return detections
+
+    # =========================================================================
+    # BÍ DANH TIẾNG VIỆT (VIETNAMESE METHOD ALIASES)
+    # Giúp người mới đọc hiểu luồng xử lý mà không làm gãy chuẩn quốc tế
+    # =========================================================================
+    tai_mo_hinh = load
+    nhan_dien = detect
+    khoi_dong_am = _warmup
+
+
+# =============================================================================
+# BÍ DANH LỚP TIẾNG VIỆT (VIETNAMESE CLASS ALIASES)
+# =============================================================================
+BoNhanDienRac = WasteDetector
+LoiTaiMoHinh = ModelLoadError
+LoiKhungHinhKhongHopLe = InvalidFrameError
+

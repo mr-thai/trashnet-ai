@@ -276,6 +276,7 @@ class AuditLogDialog(QDialog):
             "Lưu tệp báo cáo CSV",
             "trashnet_session_report.csv",
             "Tệp CSV (*.csv);;Tất cả tệp (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not file_path:
             return

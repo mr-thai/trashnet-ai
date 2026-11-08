@@ -1,7 +1,9 @@
-"""Centralized configuration loader for Trash-Net application.
+"""Hệ thống nạp và quản lý cấu hình tập trung cho ứng dụng Trash-Net.
 
-Parses config/app.yaml, applies environment variable overrides,
-and provides strongly typed configuration dataclasses decoupled from GUI frameworks.
+[KIẾN TRÚC & LUỒNG HOẠT ĐỘNG]:
+1. Đọc và phân tích file cấu hình gốc config/app.yaml.
+2. Áp dụng các biến môi trường ghi đè (TRASHNET_CONF, TRASHNET_IOU, TRASHNET_DEVICE...).
+3. Cung cấp các dataclass cấu hình phân hệ độc lập hoàn toàn với giao diện Desktop.
 """
 
 from dataclasses import dataclass, field
@@ -15,7 +17,7 @@ DEFAULT_CONFIG_PATH = Path("config/app.yaml")
 
 @dataclass
 class ModelConfig:
-    """YOLO segmentation model configuration parameters."""
+    """Cấu hình tham số mô hình phân đoạn YOLO."""
     weights_path: str = "models/best.pt"
     conf: float = 0.25
     iou: float = 0.45
@@ -26,7 +28,7 @@ class ModelConfig:
 
 @dataclass
 class SmootherConfig:
-    """Temporal smoothing and anti-flickering configuration."""
+    """Cấu hình bộ làm mượt và chống rung nhấp nháy nhãn."""
     enabled: bool = True
     window_size: int = 30
     stability_threshold_sec: float = 1.5
@@ -36,7 +38,7 @@ class SmootherConfig:
 
 @dataclass
 class CameraConfig:
-    """Camera streaming and video capture configuration."""
+    """Cấu hình thu phát video và camera webcam."""
     default_index: int = 0
     max_probe_index: int = 6
     width: int = 640
@@ -46,7 +48,7 @@ class CameraConfig:
 
 @dataclass
 class UIConfig:
-    """Desktop user interface configuration."""
+    """Cấu hình giao diện người dùng Desktop."""
     window_title: str = "Trash-Net — Hệ Thống Phân Loại Rác Thông Minh"
     min_width: int = 1280
     min_height: int = 720
@@ -55,7 +57,7 @@ class UIConfig:
 
 @dataclass
 class AppConfig:
-    """Root application configuration aggregating all operational settings."""
+    """Cấu hình gốc của toàn bộ ứng dụng Trash-Net."""
     model: ModelConfig = field(default_factory=ModelConfig)
     smoother: SmootherConfig = field(default_factory=SmootherConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
@@ -155,3 +157,19 @@ class AppConfig:
             ui=ui_cfg,
             config_path=path if path.exists() else None,
         )
+
+    # =========================================================================
+    # BÍ DANH TIẾNG VIỆT (VIETNAMESE METHOD ALIASES)
+    # =========================================================================
+    tai_cau_hinh = load
+
+
+# =============================================================================
+# BÍ DANH LỚP TIẾNG VIỆT (VIETNAMESE CLASS ALIASES)
+# =============================================================================
+CauHinhHeThong = AppConfig
+CauHinhMoHinh = ModelConfig
+CauHinhBoLamMuot = SmootherConfig
+CauHinhCamera = CameraConfig
+CauHinhGiaoDien = UIConfig
+

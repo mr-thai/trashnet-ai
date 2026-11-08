@@ -1,15 +1,17 @@
-"""Main application window for Trash-Net waste classification (US-3.1, US-3.3 Static & Webcam).
+"""Cửa sổ ứng dụng chính Desktop cho hệ thống phân loại rác Trash-Net.
 
-Integrates VideoView, BinBanner, ResultList, ControlPanel, and WebcamThread
-within a responsive QSplitter layout complying with DoD >= 1280x720.
-Supports Drag & Drop, real-time Webcam state machine (Idle -> Running -> Paused -> Stopped),
-V4L2 backend capture, and background inference without memory leaks.
+[KIẾN TRÚC & LUỒNG HOẠT ĐỘNG]:
+1. Tích hợp các widget: Khung xem hình ảnh/video (VideoView), Banner thùng rác (BinBanner),
+   Danh sách kết quả (ResultList), Bảng điều khiển (ControlPanel), Thẻ hướng dẫn (GuidelineCard).
+2. Hỗ trợ đa chế độ: Kéo thả ảnh tĩnh (Drag & Drop), Phát video quét từng khung hình,
+   và Nhận diện trực tiếp qua Webcam thời gian thực.
+3. Chạy toàn bộ suy luận mô hình ngầm qua QThread để đảm bảo giao diện luôn mượt mà.
 """
 
 from pathlib import Path
 import sys
 import time
-from typing import List, Optional
+from typing import List, Optional, Union
 import numpy as np
 
 from core.audit_log import AuditLogger
@@ -40,6 +42,7 @@ from ui.qt_compat import (
     QWidget,
 )
 from ui.utils import FILE_DIALOG_IMAGE_FILTER, load_image_unicode
+from ui.video_thread import VideoThread
 from ui.webcam_thread import CameraState, WebcamThread, list_available_cameras
 from ui.widgets.audit_dialog import AuditLogDialog
 from ui.widgets.bin_banner import BinBanner
@@ -120,6 +123,7 @@ class MainWindow(QMainWindow):
 
         self.current_worker: Optional[InferenceWorker] = None
         self._webcam_worker: Optional[InferenceWorker] = None
+        self._video_thread: Optional[VideoThread] = None
         self.webcam_thread = WebcamThread(self)
         det_conf = self.detector.conf if hasattr(self, "detector") and self.detector is not None else 0.25
         self.ood_detector = OODDetector(conf_threshold=det_conf)
@@ -242,7 +246,19 @@ class MainWindow(QMainWindow):
 
     @Slot(int)
     def on_start_webcam(self, camera_index: int) -> None:
-        """Start streaming from chosen camera index with size-1 buffer InferenceWorker."""
+        """Start streaming from chosen camera index with size-1 buffer InferenceWorker.
+
+        [GIẢI THÍCH NGHIỆP VỤ - KHỞI ĐỘNG LUỒNG WEBCAM THỜI GIAN THỰC]:
+        [LUỒNG LÀM VIỆC]:
+        1. Dừng phát video hoặc luồng phân tích tĩnh trước đó.
+        2. Khởi tạo bộ làm mượt TemporalSmoother để chống rung nhấp nháy nhãn rác.
+        3. Khởi tạo WebcamInferenceWorker với bộ đệm kích thước 1 (size-1 buffer)
+           để luôn chỉ suy luận khung hình mới nhất, triệt tiêu độ trễ tích lũy.
+        4. Bật luồng phần cứng WebcamThread đọc camera qua V4L2 backend.
+        """
+        # Stop any active video playback
+        self.stop_video_playback()
+
         # Stop any active static file inference
         if self.current_worker is not None and self.current_worker.isRunning():
             self.current_worker.terminate()
@@ -284,19 +300,30 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_pause_webcam(self) -> None:
-        """Pause webcam streaming: hold last frame and pause inference."""
+        """Pause webcam or video streaming: hold last frame and pause inference."""
+        if self._video_thread is not None and self._video_thread.isRunning():
+            self._video_thread.pause()
+            self.status_bar.showMessage("Video tạm dừng — Giữ khung hình hiện tại.")
+            return
+
         self.webcam_thread.pause_capture()
         self.status_bar.showMessage("Webcam tạm dừng — Giữ khung hình hiện tại.")
 
     @Slot()
     def on_resume_webcam(self) -> None:
-        """Resume webcam streaming."""
+        """Resume webcam or video streaming."""
+        if self._video_thread is not None and self._video_thread.isRunning():
+            self._video_thread.resume()
+            self.status_bar.showMessage("Video tiếp tục phát.")
+            return
+
         self.webcam_thread.resume_capture()
         self.status_bar.showMessage("Webcam tiếp tục phát trực tiếp.")
 
     @Slot()
     def on_stop_webcam(self) -> None:
-        """Stop webcam stream and completely release hardware device (camera LED off)."""
+        """Stop webcam or video stream and completely release hardware device (camera LED off)."""
+        self.stop_video_playback()
         self.webcam_thread.stop_capture()
         if self._webcam_worker is not None:
             try:
@@ -383,6 +410,7 @@ class MainWindow(QMainWindow):
             "Chọn tệp ảnh rác",
             "",
             FILE_DIALOG_IMAGE_FILTER,
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not file_path:
             return
@@ -390,8 +418,17 @@ class MainWindow(QMainWindow):
         self.load_image_file(Path(file_path))
 
     def load_image_file(self, path: Path) -> bool:
-        """Load and display an image from file path with Unicode support and run inference."""
-        # Stop webcam if active when user opens an image
+        """Load and display an image from file path with Unicode support and run inference.
+
+        [GIẢI THÍCH NGHIỆP VỤ - NẠP ẢNH TĨNH & PHÂN TÍCH]:
+        [LUỒNG LÀM VIỆC]:
+        1. Dừng video hoặc webcam đang chạy nếu có để tránh xung đột GPU.
+        2. Đọc file ảnh hỗ trợ đường dẫn tiếng Việt Unicode qua OpenCV (load_image_unicode).
+        3. Cập nhật khung hiển thị VideoView với ảnh gốc.
+        4. Kích hoạt luồng chạy ngầm (_start_inference) để mô hình YOLO dự đoán mà không đơ UI.
+        """
+        # Stop video playback or webcam if active when user opens an image
+        self.stop_video_playback()
         if self.webcam_thread.current_state in (CameraState.RUNNING, CameraState.PAUSED):
             self.on_stop_webcam()
 
@@ -412,7 +449,14 @@ class MainWindow(QMainWindow):
         return True
 
     def _start_inference(self, frame: np.ndarray) -> None:
-        """Run inference asynchronously using InferenceWorker."""
+        """Run inference asynchronously using InferenceWorker.
+
+        [GIẢI THÍCH NGHIỆP VỤ - SUY LUẬN NGẦM TRÁNH ĐƠ GIAO DIỆN]:
+        [LUỒNG LÀM VIỆC]:
+        1. Đọc các tham số ngưỡng hiện thời trên thanh điều khiển: conf, iou, topk.
+        2. Tạo một tiến trình ngầm InferenceWorker chạy tách biệt khỏi Main GUI Thread.
+        3. Kết nối tín hiệu (Signals/Slots): khi có kết quả -> _on_inference_finished.
+        """
         if self.detector is None:
             self.status_bar.showMessage("Cảnh báo: Chưa nạp mô hình suy luận.")
             return
@@ -462,17 +506,133 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def open_video_dialog(self) -> None:
-        """Present file chooser dialog for video streams."""
+        """Present file chooser dialog for video streams and start inference-paced scan (Option 1)."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Chọn tệp video rác",
             "",
             "Video (*.mp4 *.avi *.mkv *.mov);;Tất cả tệp (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not file_path:
             return
 
-        self.status_bar.showMessage(f"Đã chọn video: {Path(file_path).name} (sẵn sàng xử lý)")
+        self.start_video_playback(Path(file_path))
+
+    def start_video_playback(self, path: Union[str, Path]) -> None:
+        """Bắt đầu quét và phân loại video từng khung hình đồng bộ theo tốc độ suy luận của AI.
+
+        [LUỒNG LÀM VIỆC]:
+        1. Dừng luồng webcam hoặc luồng phân tích ảnh tĩnh nếu đang chạy.
+        2. Khởi tạo bộ làm mượt TemporalSmoother (nếu được cấu hình bật).
+        3. Tạo luồng VideoThread và kết nối tín hiệu frame_processed về hàm cập nhật giao diện.
+        """
+        path = Path(path)
+        if self.detector is None:
+            self.status_bar.showMessage("Cảnh báo: Chưa nạp mô hình suy luận.")
+            return
+
+        # 1. Dừng webcam nếu đang phát
+        if self.webcam_thread.isRunning():
+            self.on_stop_webcam()
+
+        # 2. Dừng luồng suy luận ảnh tĩnh nếu đang chạy
+        if self.current_worker is not None and self.current_worker.isRunning():
+            self.current_worker.terminate()
+            self.current_worker.wait()
+
+        # 3. Dừng video cũ nếu đang phát
+        self.stop_video_playback()
+
+        # 4. Khởi tạo bộ làm mượt nếu được bật trong cấu hình
+        smoother = None
+        if self.app_config.smoother.enabled:
+            smoother = TemporalSmoother(
+                window_size=self.app_config.smoother.window_size,
+                stability_threshold_sec=self.app_config.smoother.stability_threshold_sec,
+                disappear_timeout_sec=self.app_config.smoother.disappear_timeout_sec,
+                require_confirmation=self.app_config.smoother.require_confirmation,
+            )
+
+        conf = self.control_panel.confidence_threshold
+        iou = self.control_panel.iou_threshold
+        topk = self.control_panel.max_detections
+
+        self._video_thread = VideoThread(
+            detector=self.detector,
+            video_path=path,
+            conf=conf,
+            iou=iou,
+            max_detections=topk,
+            smoother=smoother,
+            parent=self,
+        )
+        self._video_thread.frame_processed.connect(self._on_video_frame_processed)
+        self._video_thread.fps_updated.connect(self.on_inference_fps_updated)
+        self._video_thread.state_changed.connect(self._on_video_state_changed)
+        self._video_thread.video_finished.connect(self._on_video_finished)
+        self._video_thread.error_occurred.connect(self._on_video_error)
+
+        self.control_panel.confidence_changed.connect(self._video_thread.set_confidence)
+        self.control_panel.iou_changed.connect(self._video_thread.set_iou)
+        self.control_panel.max_detections_changed.connect(self._video_thread.set_max_detections)
+
+        self.status_bar.showMessage(f"Bắt đầu quét video: {path.name} (Đồng bộ nhịp AI)...")
+        self._video_thread.start()
+
+    def stop_video_playback(self) -> None:
+        """Safely stop and clean up active video playback thread."""
+        if self._video_thread is not None:
+            try:
+                self.control_panel.confidence_changed.disconnect(self._video_thread.set_confidence)
+                self.control_panel.iou_changed.disconnect(self._video_thread.set_iou)
+                self.control_panel.max_detections_changed.disconnect(self._video_thread.set_max_detections)
+            except Exception:
+                pass
+            self._video_thread.stop(timeout_ms=2000)
+            self._video_thread = None
+
+    @Slot(np.ndarray, list, float, int, int)
+    def _on_video_frame_processed(
+        self,
+        frame: np.ndarray,
+        detections: List[Detection],
+        latency_ms: float,
+        frame_idx: int,
+        total_frames: int,
+    ) -> None:
+        """Handle synchronous frame-by-frame video detection result."""
+        self._current_frame = frame
+        self._current_detections = list(detections)
+        self.video_view.set_frame(frame, detections)
+        self.update_results(detections)
+        self._inference_latency_ms = latency_ms
+
+        pct = (frame_idx / total_frames * 100) if total_frames > 0 else 0
+        det_count = len(detections)
+        self.status_bar.showMessage(
+            f"Video: [{frame_idx}/{total_frames} ({pct:.0f}%)] | "
+            f"AI: {self._inference_fps:.1f} FPS (Độ trễ: {latency_ms:.1f} ms) | "
+            f"Phát hiện: {det_count} vật thể"
+        )
+
+    @Slot(str)
+    def _on_video_state_changed(self, state: str) -> None:
+        """Synchronize UI buttons with video playback state."""
+        self.control_panel.set_camera_state(state)
+
+    @Slot()
+    def _on_video_finished(self) -> None:
+        """Handle completion of video scanning."""
+        self.status_bar.showMessage("Hoàn tất: Đã quét xong toàn bộ tệp video.")
+        self.control_panel.set_camera_state("STOPPED")
+
+    @Slot(str)
+    def _on_video_error(self, err_msg: str) -> None:
+        """Handle video decoding or playback failure."""
+        self.status_bar.showMessage(f"Lỗi video: {err_msg}")
+        self.control_panel.set_camera_state("STOPPED")
+        QMessageBox.warning(self, "Lỗi đọc tệp video", f"Không thể xử lý video:\n{err_msg}")
 
     @Slot(bool)
     def on_toggle_webcam(self, active: bool) -> None:
@@ -510,7 +670,16 @@ class MainWindow(QMainWindow):
             self._start_inference(self._current_frame)
 
     def update_results(self, detections: List[Detection]) -> None:
-        """Update detection cards and destination bin banner with UI throttling."""
+        """Update detection cards and destination bin banner with UI throttling.
+
+        [GIẢI THÍCH NGHIỆP VỤ - CẬP NHẬT KẾT QUẢ LÊN GIAO DIỆN]:
+        [LUỒNG LÀM VIỆC]:
+        1. Chạy qua bộ kiểm tra OODDetector để phát hiện các vật thể bất thường.
+        2. Điều tiết tần suất cập nhật UI (Throttling tối đa 2 lần/giây khi streaming) để không lag giao diện.
+        3. Cập nhật Banner thùng rác (BinBanner) theo vật thể có độ tin cậy cao nhất.
+        4. Cập nhật Thẻ hướng dẫn xử lý rác (GuidelineCard) hiển thị mẹo chuẩn bị rác.
+        5. Tự động ghi nhật ký kiểm toán (AuditLogger) nếu là ảnh tĩnh hoặc rác nguy hại.
+        """
         checked = self.ood_detector.check_detections(detections) if hasattr(self, "ood_detector") else detections
         self._current_detections = list(checked)
 
@@ -555,7 +724,15 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_flag_requested(self) -> None:
-        """Handle reporting and hazardous waste tagging (US-4.4)."""
+        """Handle reporting and hazardous waste tagging (US-4.4).
+
+        [GIẢI THÍCH NGHIỆP VỤ - BÁO CÁO & GẮN CỜ RÁC NGUY HẠI]:
+        [LUỒNG LÀM VIỆC]:
+        1. Hiển thị hộp thoại hỏi người dùng xác nhận loại rác (Nguy hại / Chưa chắc chắn).
+        2. Nếu người dùng chọn 'Yes' hoặc 'No', mở tiếp hộp thoại nhập ghi chú lý do.
+        3. Gọi save_flagged_frame() lưu ảnh JPEG và metadata JSON vào thư mục flagged/.
+        4. Ghi nhận sự kiện vào hệ thống nhật ký kiểm toán AuditLogger.
+        """
         if self._current_frame is None:
             self.status_bar.showMessage("Chưa có khung hình để báo cáo / gắn cờ.")
             return
@@ -595,13 +772,15 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_open_log_requested(self) -> None:
-        """Open audit log viewer and CSV export dialog (US-4.5)."""
+        """Mở cửa sổ xem nhật ký kiểm toán và xuất báo cáo CSV."""
         dialog = AuditLogDialog(self.audit_logger, parent=self)
         dialog.exec()
 
     @Slot()
     def reset_all(self) -> None:
-        """Clear loaded frames, results, reset banner, and stop webcam."""
+        """Đặt lại toàn bộ trạng thái hệ thống: Dọn khung hình, xóa danh sách kết quả, đặt lại thùng rác."""
+        self.stop_video_playback()
+
         if self.webcam_thread.isRunning():
             self.on_stop_webcam()
 
@@ -619,7 +798,10 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Đã đặt lại trạng thái chờ.")
 
     def closeEvent(self, event) -> None:
-        """Ensure both CaptureThread and InferenceWorker halt cleanly within 2 seconds."""
+        """Sự kiện đóng cửa sổ: Giải phóng tài nguyên và dừng an toàn toàn bộ tiến trình ngầm."""
+        """Ensure CaptureThread, VideoThread, and InferenceWorker halt cleanly within 2 seconds."""
+        self.stop_video_playback()
+
         if hasattr(self, "_webcam_worker") and self._webcam_worker is not None:
             self._webcam_worker.stop(timeout_ms=2000)
             self._webcam_worker = None
@@ -635,7 +817,15 @@ class MainWindow(QMainWindow):
 
 
 def run_app(argv: Optional[List[str]] = None) -> None:
-    """Launch Trash-Net desktop application with dynamic CLI flag support."""
+    """Launch Trash-Net desktop application with dynamic CLI flag support.
+
+    [GIẢI THÍCH NGHIỆP VỤ - CHẠY ỨNG DỤNG DESKTOP]:
+    Điểm vào chính khởi chạy giao diện Desktop PyQt:
+    1. Đọc cờ tham số dòng lệnh CLI (nếu có: --model, --conf, --iou, --device, --camera).
+    2. Nạp file cấu hình config/app.yaml và áp dụng các giá trị ghi đè.
+    3. Khởi tạo đối tượng QApplication và cửa sổ MainWindow (kích thước tối thiểu 1280x720).
+    4. Hiển thị giao diện và bước vào vòng lặp sự kiện chính của ứng dụng.
+    """
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -679,5 +869,12 @@ def run_app(argv: Optional[List[str]] = None) -> None:
     sys.exit(app.exec())
 
 
+# =============================================================================
+# BÍ DANH HÀM TIẾNG VIỆT (VIETNAMESE FUNCTION ALIASES)
+# =============================================================================
+chay_ung_dung = run_app
+
+
 if __name__ == "__main__":
     run_app()
+

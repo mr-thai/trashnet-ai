@@ -33,6 +33,15 @@ ENV/
 runs/
 *.zip
 
+# Media & Presentation Assets
+*.mp4
+*.avi
+*.mov
+*.mkv
+doc_slide/
+baocao_slide-trashnet.zip
+
+
 # Pytest & Coverage
 .pytest_cache/
 .coverage

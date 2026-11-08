@@ -26,8 +26,12 @@ class CameraState(str, Enum):
 def list_available_cameras(max_indices: int = 6) -> List[int]:
     """Scan and list available video capture camera indices on the system.
 
-    Returns:
-        List of integer camera indices that can be opened.
+    [GIẢI THÍCH NGHIỆP VỤ - QUÉT DANH SÁCH CAMERA HỆ THỐNG]:
+    [LUỒNG LÀM VIỆC]:
+    1. Trên Linux: Quét trực tiếp danh sách file thiết bị `/dev/video*`.
+    2. Thử mở từng camera qua backend V4L2 và giải phóng ngay để không chiếm giữ.
+    3. Nếu không có V4L2: Dò tuần tự theo chỉ số từ 0 đến max_indices.
+    4. Trả về danh sách các cổng camera hợp lệ có thể sử dụng được.
     """
     valid_indices: List[int] = []
 
@@ -142,7 +146,16 @@ class CaptureThread(QThread):
             self._cap = None
 
     def run(self) -> None:
-        """Thread worker loop reading frames from camera via V4L2."""
+        """Thread worker loop reading frames from camera via V4L2.
+
+        [GIẢI THÍCH NGHIỆP VỤ - VÒNG LẶP ĐỌC KHUNG HÌNH WEBCAM]:
+        [LUỒNG LÀM VIỆC]:
+        1. Mở thiết bị camera qua chuẩn V4L2 (Linux) với buffer size = 1 để chống trễ tích lũy.
+        2. Chuyển máy trạng thái sang RUNNING và bắt đầu vòng lặp đọc khung hình liên tục.
+        3. Trong mỗi chu kỳ: Kiểm tra cờ tạm dừng (_paused); nếu bình thường thì đọc frame mới.
+        4. Phát tín hiệu frame_captured.emit(frame) gửi sang luồng GUI và luồng suy luận.
+        5. Khi dừng: Giải phóng hoàn toàn thiết bị phần cứng, tắt đèn camera và chuyển sang STOPPED.
+        """
         # 1. Open camera device
         backend = cv2.CAP_V4L2 if platform.system() == "Linux" else cv2.CAP_ANY
         self._cap = cv2.VideoCapture(self._camera_index, backend)

@@ -113,14 +113,93 @@ IDLE_BANNER_STYLE = {
 
 # Dark theme palette
 DARK_PALETTE_QSS = """
-QMainWindow {
+QMainWindow, QDialog, QMessageBox {
     background-color: #111827;
 }
 
 QWidget {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     color: #F3F4F6;
-    background-color: transparent;
+}
+
+/* File Explorer (QFileDialog) & Dialog Enhancements */
+QFileDialog {
+    background-color: #111827;
+    color: #F3F4F6;
+}
+
+QFileDialog QTreeView, QFileDialog QListView {
+    background-color: #1F2937;
+    color: #F3F4F6;
+    border: 1px solid #374151;
+    border-radius: 6px;
+    padding: 4px;
+}
+
+QFileDialog QTreeView::item:selected, QFileDialog QListView::item:selected {
+    background-color: #2563EB;
+    color: #FFFFFF;
+}
+
+QFileDialog QLineEdit {
+    background-color: #1F2937;
+    color: #F3F4F6;
+    border: 1px solid #374151;
+    border-radius: 4px;
+    padding: 5px 8px;
+}
+
+QFileDialog QPushButton {
+    background-color: #374151;
+    color: #F3F4F6;
+    border: 1px solid #4B5563;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-weight: 600;
+}
+
+QFileDialog QPushButton:hover {
+    background-color: #4B5563;
+    color: #FFFFFF;
+}
+
+QFileDialog QHeaderView::section {
+    background-color: #1F2937;
+    color: #9CA3AF;
+    padding: 4px 6px;
+    border: none;
+    border-bottom: 1px solid #374151;
+}
+
+QFileDialog QComboBox {
+    background-color: #1F2937;
+    color: #F3F4F6;
+    border: 1px solid #374151;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+QFileDialog QToolButton {
+    background-color: #1F2937;
+    color: #F3F4F6;
+    border: 1px solid #374151;
+    border-radius: 4px;
+    padding: 4px 6px;
+    margin: 2px;
+}
+
+QFileDialog QToolButton:hover {
+    background-color: #374151;
+    border-color: #4B5563;
+}
+
+QFileDialog QToolButton:pressed {
+    background-color: #111827;
+}
+
+QFileDialog QLabel {
+    color: #D1D5DB;
+    font-size: 12px;
 }
 
 QSplitter::handle {
@@ -153,6 +232,28 @@ QScrollBar::handle:vertical:hover {
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
+}
+
+QScrollBar:horizontal {
+    border: none;
+    background: #1F2937;
+    height: 8px;
+    margin: 0px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #4B5563;
+    min-width: 24px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: #6B7280;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0px;
 }
 
 QStatusBar {

@@ -1,7 +1,9 @@
-"""Session audit logging and CSV export system for Trash-Net (US-4.5).
+"""Hệ thống ghi nhật ký kiểm toán và xuất báo cáo CSV cho Trash-Net.
 
-Records confirmed detection events with deduplication, bin summaries,
-and exports UTF-8 with BOM (utf-8-sig) CSV reports compatible with Excel.
+[KIẾN TRÚC & LUỒNG HOẠT ĐỘNG]:
+1. Ghi nhận các sự kiện nhận diện rác thải đã xác nhận (Confirmed) với cơ chế chống ghi trùng lặp (Cooldown deduplication).
+2. Thống kê tổng hợp số lượng rác theo từng loại thùng chứa.
+3. Xuất file báo cáo định dạng CSV chuẩn mã hóa UTF-8 BOM (utf-8-sig) mở trực tiếp trên Excel không bị lỗi phông tiếng Việt.
 """
 
 import csv
@@ -27,7 +29,13 @@ class AuditEntry:
 
 
 class AuditLogger:
-    """Manages in-memory session audit logs with deduplication and CSV exporting."""
+    """Manages in-memory session audit logs with deduplication and CSV exporting.
+
+    [GIẢI THÍCH NGHIỆP VỤ - HỆ THỐNG NHẬT KÝ KIỂM TOÁN]:
+    Ghi nhận lại toàn bộ các sự kiện nhận diện rác thải đã được xác nhận (Confirmed),
+    có cơ chế chống ghi trùng lặp (cooldown deduplication), thống kê số lượng theo loại thùng,
+    và hỗ trợ xuất báo cáo định dạng CSV mã hóa UTF-8 BOM hiển thị chuẩn tiếng Việt trên Excel.
+    """
 
     def __init__(self, cooldown_seconds: float = 3.0) -> None:
         """Initialize AuditLogger.
@@ -64,22 +72,11 @@ class AuditLogger:
         track_id: Optional[int] = None,
         timestamp: Optional[datetime] = None,
     ) -> bool:
-        """Record a confirmed detection event with anti-duplication protection.
-
-        Args:
-            detection: Confirmed Detection object.
-            source: 'webcam' or 'image'.
-            is_hazardous: Flag indicating dangerous or unknown material.
-            track_id: Optional tracking identifier for persistent objects.
-            timestamp: Optional custom datetime for deterministic testing.
-
-        Returns:
-            True if newly recorded, False if deduplicated (skipped).
-        """
+        """Ghi nhận sự kiện phân loại rác kèm cơ chế chống trùng lặp theo thời gian (Cooldown)."""
         now = timestamp if timestamp is not None else datetime.now()
         now_ts = now.timestamp()
 
-        # 1. Anti-duplication by persistent track_id
+        # Cơ chế 1: Chống ghi trùng theo mã định danh vết theo dõi (track_id)
         if track_id is not None:
             if track_id in self._logged_tracks:
                 last_time = self._logged_tracks[track_id]
@@ -87,7 +84,7 @@ class AuditLogger:
                     return False
             self._logged_tracks[track_id] = now_ts
         else:
-            # 2. Anti-duplication by spatial signature (class + box coordinates)
+            # Cơ chế 2: Chống ghi trùng theo chữ ký không gian (tên lớp + tọa độ bounding box)
             sig = f"{detection.class_name}_{detection.box}"
             if sig in self._recent_signatures:
                 last_time = self._recent_signatures[sig]
@@ -108,7 +105,7 @@ class AuditLogger:
         return True
 
     def get_summary_by_bin(self) -> Dict[Bin, int]:
-        """Compute distribution count grouped by destination waste bin."""
+        """Thống kê tổng số lượng vật thể đã ghi nhận theo từng loại thùng chứa."""
         summary: Dict[Bin, int] = {
             Bin.ORGANIC: 0,
             Bin.RECYCLABLE: 0,
@@ -121,14 +118,7 @@ class AuditLogger:
         return summary
 
     def export_csv(self, file_path: Union[str, Path]) -> Path:
-        """Export session audit log to CSV with UTF-8 BOM encoding for Excel compatibility.
-
-        Args:
-            file_path: Destination output CSV file path.
-
-        Returns:
-            Path object of the created CSV file.
-        """
+        """Xuất toàn bộ nhật ký phiên làm việc ra file CSV hỗ trợ tiếng Việt trên Excel."""
         out_path = Path(file_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -141,7 +131,6 @@ class AuditLogger:
             "Cảnh báo nguy hại",
         ]
 
-        # Use utf-8-sig to write the UTF-8 Byte Order Mark (BOM: \ufeff)
         with open(out_path, mode="w", encoding="utf-8-sig", newline="") as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(headers)
@@ -161,3 +150,19 @@ class AuditLogger:
                 )
 
         return out_path
+
+    # =========================================================================
+    # BÍ DANH TIẾNG VIỆT (VIETNAMESE METHOD ALIASES)
+    # =========================================================================
+    ghi_nhat_ky = log_detection
+    thong_ke_theo_thung = get_summary_by_bin
+    xuat_bao_cao_csv = export_csv
+    xoa_trang = clear
+
+
+# =============================================================================
+# BÍ DANH LỚP TIẾNG VIỆT (VIETNAMESE CLASS ALIASES)
+# =============================================================================
+NhatKyHeThong = AuditLogger
+MucKiemToan = AuditEntry
+

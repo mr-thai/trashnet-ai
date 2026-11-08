@@ -1,6 +1,8 @@
-"""Structured data types and enums for Trash-Net (US-2.2 & US-2.3).
+"""Các kiểu dữ liệu và Enum cốt lõi cho hệ thống Trash-Net.
 
-Contains Bin classification categories and immutable Detection dataclass.
+[KIẾN TRÚC & LUỒNG HOẠT ĐỘNG]:
+1. Định nghĩa phân loại thùng rác đích (Bin: Hữu cơ, Tái chế, Vô cơ, Nguy hại, Không xác định).
+2. Định nghĩa cấu trúc kết quả nhận diện bất biến (Detection dataclass: Tọa độ, Đa giác mặt nạ, Độ tin cậy).
 """
 
 from dataclasses import dataclass
@@ -9,7 +11,7 @@ from typing import List, Tuple
 
 
 class Bin(str, Enum):
-    """Destination waste sorting bin category."""
+    """Phân loại thùng rác đích cho từng loại phế thải."""
 
     RECYCLABLE = "RECYCLABLE"  # Thùng Tái chế (giấy, nhựa, kim loại, thủy tinh)
     ORGANIC = "ORGANIC"        # Thùng Hữu cơ (thực phẩm, rác hữu cơ)
@@ -19,7 +21,7 @@ class Bin(str, Enum):
 
     @property
     def display_name(self) -> str:
-        """User-friendly Vietnamese display label."""
+        """Nhãn tiếng Việt thân thiện hiển thị trên giao diện người dùng."""
         names = {
             Bin.RECYCLABLE: "Tái chế",
             Bin.ORGANIC: "Hữu cơ",
@@ -32,16 +34,7 @@ class Bin(str, Enum):
 
 @dataclass(frozen=True)
 class Detection:
-    """Immutable structured representation of an object detection/segmentation result.
-
-    Attributes:
-        class_id (int): Zero-indexed category identifier (0-7).
-        class_name (str): Label name of the detected waste class.
-        confidence (float): Model confidence score in range [0.0, 1.0].
-        box (Tuple[int, int, int, int]): Bounding box in (x1, y1, x2, y2) integer pixel coordinates.
-        polygon (List[Tuple[int, int]]): Ordered list of contour (x, y) integer pixel coordinates.
-        bin_type (Bin): Destination sorting bin category.
-    """
+    """Cấu trúc dữ liệu bất biến biểu diễn một vật thể rác được phát hiện."""
 
     class_id: int
     class_name: str
@@ -49,3 +42,11 @@ class Detection:
     box: Tuple[int, int, int, int]
     polygon: List[Tuple[int, int]]
     bin_type: Bin
+
+
+# =============================================================================
+# BÍ DANH LỚP TIẾNG VIỆT (VIETNAMESE CLASS ALIASES)
+# =============================================================================
+ThungRac = Bin
+KetQuaNhanDien = Detection
+
